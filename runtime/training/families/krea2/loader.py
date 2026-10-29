@@ -28,8 +28,12 @@ from safetensors import safe_open
 
 from modeling.krea2 import KREA2_CONFIG, Krea2Config, SingleStreamDiT
 from training.families.krea2.quant_fp8 import (
+    INT8_TENSORWISE_FORMAT,
+    MXFP8_FORMAT,
+    mxfp8_scale_shape,
     parse_quantization_metadata,
     patch_fp8_linears,
+    patch_mxfp8_linears,
 )
 
 
@@ -72,6 +76,10 @@ class Krea2CheckpointInfo:
     parameter_count: int
     #: ConvRot INT8 layer -> group size (empty for bf16 / fp8 checkpoints)
     convrot_groups: dict[str, int] = field(default_factory=dict)
+    #: plain int8_tensorwise layers (no convrot, e.g. Turbo INT8)
+    int8_tensorwise_layers: frozenset[str] = frozenset()
+    #: mxfp8 layers (fp8 weight + swizzled E8M0 block scales)
+    mxfp8_layers: frozenset[str] = frozenset()
 
 
 def _checkpoint_path(path: str | Path) -> Path:
@@ -221,10 +229,12 @@ def _inspect(
                 f"{fp8_keys[0]}), but the caller requires full-precision weights."
             )
         convrot_groups: dict[str, int] = {}
-        # fp8_scaled / ConvRot INT8 consistency: a layer with a scale must have
+        int8_tensorwise_layers: set[str] = set()
+        mxfp8_layers: set[str] = set()
+        # fp8_scaled / mxfp8 / INT8 consistency: a layer with a scale must have
         # fp8 or int8 weights; an int8 layer needs both its scale and its
-        # comfy_quant spec; a layer declared in metadata with neither fp8
-        # weights nor a scale is a malformed file
+        # comfy_quant spec; a layer declared in metadata must hold weights of
+        # the declared kind
         if allow_fp8:
             fp8_set = set(fp8_keys)
             int8_set = set(int8_keys)
@@ -237,14 +247,34 @@ def _inspect(
                 weight = f"{layer}.weight"
                 if weight not in fp8_set and weight not in int8_set:
                     errors.append(f"{layer} has weight_scale but its weight isn't fp8 or int8")
-            for layer in quant_meta:
-                if f"{layer}.weight" not in fp8_set:
+            for layer, conf in quant_meta.items():
+                layer = _normalize_key(layer, prefix)
+                weight = f"{layer}.weight"
+                if conf.get("format") == INT8_TENSORWISE_FORMAT:
+                    if weight not in int8_set:
+                        errors.append(f"metadata declares int8 layer {layer} but its weight isn't int8")
+                elif weight not in fp8_set:
                     errors.append(f"metadata declares quantized layer {layer} but its weight isn't fp8")
+                elif conf.get("format") == MXFP8_FORMAT:
+                    scale_key = scale_to_source.get(layer)
+                    out_features, in_features = expected_shapes[weight]
+                    expected_scale = mxfp8_scale_shape(out_features, in_features)
+                    scale_shape = (
+                        tuple(handle.get_slice(scale_key).get_shape()) if scale_key else None
+                    )
+                    if in_features % 32:
+                        errors.append(f"mxfp8 layer {layer} in_features is not a multiple of 32")
+                    elif scale_shape != expected_scale:
+                        errors.append(
+                            f"mxfp8 layer {layer} block scale shape {scale_shape} != {expected_scale}"
+                        )
+                    else:
+                        mxfp8_layers.add(layer)
             for layer in spec_to_source:
                 if f"{layer}.weight" not in int8_set:
                     errors.append(f"{layer} has comfy_quant but its weight isn't int8")
             if int8_set:
-                from training.families.quant_int8 import parse_comfy_quant
+                from training.families.quant_int8 import parse_int8_spec
 
                 for weight in sorted(int8_set):
                     layer = weight[: -len(".weight")]
@@ -253,15 +283,22 @@ def _inspect(
                     if scale_key is None or spec_key is None:
                         errors.append(f"int8 layer {layer} is missing its weight_scale or comfy_quant")
                         continue
-                    out_features = expected_shapes[weight][0]
-                    scale_shape = tuple(handle.get_slice(scale_key).get_shape())
-                    if scale_shape not in ((out_features, 1), (out_features,)):
-                        errors.append(f"int8 layer {layer} weight_scale shape {scale_shape} != ({out_features}, 1)")
-                        continue
                     try:
-                        group = parse_comfy_quant(handle.get_tensor(spec_key))["convrot_groupsize"]
+                        group = parse_int8_spec(handle.get_tensor(spec_key))
                     except ValueError as exc:
                         errors.append(f"int8 layer {layer}: {exc}")
+                        continue
+                    out_features = expected_shapes[weight][0]
+                    scale_shape = tuple(handle.get_slice(scale_key).get_shape())
+                    allowed = ((out_features, 1), (out_features,))
+                    if not group:
+                        # plain int8_tensorwise: ComfyUI also takes a tensor-wise scalar
+                        allowed += ((), (1,), (1, 1))
+                    if scale_shape not in allowed:
+                        errors.append(f"int8 layer {layer} weight_scale shape {scale_shape} != ({out_features}, 1)")
+                        continue
+                    if not group:
+                        int8_tensorwise_layers.add(layer)
                         continue
                     if expected_shapes[weight][1] % group:
                         errors.append(f"int8 layer {layer} in_features is not divisible by convrot group size {group}")
@@ -288,6 +325,8 @@ def _inspect(
             key_count=len(source_keys),
             parameter_count=parameter_count,
             convrot_groups=convrot_groups,
+            int8_tensorwise_layers=frozenset(int8_tensorwise_layers),
+            mxfp8_layers=frozenset(mxfp8_layers),
         ),
         normalized_to_source,
         scale_to_source,
@@ -523,6 +562,7 @@ def load_krea2_model(
     config: Krea2Config = KREA2_CONFIG,
     purpose: str = "train",
     blocks_to_swap: int = 0,
+    int8_matmul: str = "w8a8",
 ) -> SingleStreamDiT:
     """Strict-load a single-file Krea2 checkpoint into a frozen meta-created model.
 
@@ -545,8 +585,12 @@ def load_krea2_model(
     ConvRot INT8 checkpoints are handled the same way (int8 resident as-is,
     swapped layers pinned at 1 byte/param). ``purpose`` only picks their
     Linear forward: ``"generate"`` uses comfy-kitchen's W8A8 (ComfyUI parity),
-    anything else the fused ConvRot autograd forward used for training.
+    anything else the fused ConvRot autograd forward used for training --
+    ``int8_matmul="w8a16"`` keeps its activations in the compute dtype (the
+    weight is dequantized per layer instead of quantizing the activation).
     """
+    if int8_matmul not in ("w8a8", "w8a16"):
+        raise ValueError(f"Krea2 int8_matmul must be w8a8 or w8a16, got {int8_matmul!r}")
     if dtype not in {torch.float16, torch.bfloat16, torch.float32, torch.float64}:
         raise ValueError(f"Krea2 loader does not support dtype={dtype}")
     target_device = torch.device(device)
@@ -562,10 +606,14 @@ def load_krea2_model(
         allow_fp8=allow_fp8,
     )
     convrot_groups = info.convrot_groups
+    int8_tensorwise_layers = info.int8_tensorwise_layers
+    mxfp8_layers = info.mxfp8_layers
 
     state_dict = {}
     fp8_scales: dict[str, torch.Tensor | None] = {}
     int8_scales: dict[str, torch.Tensor] = {}
+    int8_tensorwise_scales: dict[str, torch.Tensor] = {}
+    mxfp8_scales: dict[str, torch.Tensor] = {}
     checkpoint = _checkpoint_path(path)
 
     swapped_prefixes = _swapped_block_prefixes(config, blocks_to_swap)
@@ -595,7 +643,11 @@ def load_krea2_model(
                 if tensor.dtype == torch.int8 and normalized.endswith(".weight")
                 else None
             )
-            if int8_layer not in convrot_groups and not tensor.is_floating_point():
+            if (
+                int8_layer not in convrot_groups
+                and int8_layer not in int8_tensorwise_layers
+                and not tensor.is_floating_point()
+            ):
                 raise ValueError(
                     f"Krea2 checkpoint contains a non-float param {source_key}: {tensor.dtype}"
                 )
@@ -617,7 +669,8 @@ def load_krea2_model(
                 )
                 if normalized.endswith(".weight"):
                     layer = normalized[: -len(".weight")]
-                    fp8_scales.setdefault(layer, None)
+                    if layer not in mxfp8_layers:
+                        fp8_scales.setdefault(layer, None)
             elif swapped:
                 state_dict[normalized] = packer.pin(tensor, dtype=dtype)
             else:
@@ -630,6 +683,10 @@ def load_krea2_model(
             scale = handle.get_tensor(source_key).to(device=target_device)
             if layer in convrot_groups:
                 int8_scales[layer] = scale
+            elif layer in int8_tensorwise_layers:
+                int8_tensorwise_scales[layer] = scale
+            elif layer in mxfp8_layers:
+                mxfp8_scales[layer] = scale
             else:
                 fp8_scales[layer] = scale
 
@@ -649,9 +706,16 @@ def load_krea2_model(
         # are on CPU right now, and following them would cause a device
         # mismatch at forward time (see patch_fp8_linears docstring)
         patch_fp8_linears(model, fp8_scales, device=target_device)
+    if mxfp8_scales:
+        patch_mxfp8_linears(model, mxfp8_scales, device=target_device)
     if int8_scales:
-        _patch_int8_layers(model, int8_scales, convrot_groups, purpose=purpose)
+        _patch_int8_layers(model, int8_scales, convrot_groups, purpose=purpose, int8_matmul=int8_matmul)
+    if int8_tensorwise_scales:
+        _patch_int8_tensorwise_layers(model, int8_tensorwise_scales, purpose=purpose)
     model.is_convrot_int8 = bool(int8_scales)
+    # mxfp8 / plain int8 have no LoRA merge path (it re-quantizes with one scale
+    # per layer): LoRAs on top of them always run as a separate bypass branch
+    model.lora_bypass_only = bool(mxfp8_scales or int8_tensorwise_scales)
     return model
 
 
@@ -661,6 +725,7 @@ def _patch_int8_layers(
     groups: dict[str, int],
     *,
     purpose: str,
+    int8_matmul: str = "w8a8",
 ) -> None:
     """Attach the ConvRot INT8 forward to every int8 Linear (scale = non-persistent buffer).
 
@@ -679,13 +744,37 @@ def _patch_int8_layers(
         from modeling.convrot import _patch_convrot_int8_linear, _validate_convrot_bwd_mode
 
         _validate_convrot_bwd_mode("bf16")
+        fwd_mode = "bf16" if int8_matmul == "w8a16" else "int8"
         for layer, scale in scales.items():
             module = modules[layer]
             module.register_buffer(
                 "scale_weight", scale.reshape(-1, 1).to(torch.float32), persistent=False,
             )
-            _patch_convrot_int8_linear(module, groups[layer], "bf16")
+            _patch_convrot_int8_linear(module, groups[layer], "bf16", fwd_mode)
     logger.info(
         "Krea2 ConvRot INT8: attached %s forward to %d Linear layers",
+        "W8A8" if purpose == "generate" else f"training ({int8_matmul.upper()})", len(scales),
+    )
+
+
+def _patch_int8_tensorwise_layers(
+    model: SingleStreamDiT,
+    scales: dict[str, torch.Tensor],
+    *,
+    purpose: str,
+) -> None:
+    """Attach the plain ``int8_tensorwise`` forward (no convrot) to every int8 Linear.
+
+    - generation: comfy-kitchen eager W8A8 with ``convrot=False`` (ComfyUI parity)
+    - training: int8 cast to the compute dtype + scale after the matmul (autograd gives grad_x)
+    """
+    from training.families.quant_int8 import patch_int8_linear
+
+    modules = dict(model.named_modules())
+    forward = "w8a8" if purpose == "generate" else "w8a16"
+    for layer, scale in scales.items():
+        patch_int8_linear(modules[layer], scale, 0, forward=forward)
+    logger.info(
+        "Krea2 INT8 tensorwise: attached %s forward to %d Linear layers",
         "W8A8" if purpose == "generate" else "training", len(scales),
     )

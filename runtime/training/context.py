@@ -76,6 +76,10 @@ class TrainingContext:
     # PR-2b D15, replaces the original three separate qwen_model/qwen_tok/t5_tok fields
     text_stack: Any = None
     injector: Any = None
+    # Previews on another base (Krea2 Turbo while training on Raw): weights are
+    # swapped in for each preview and swapped back after; None = previews use
+    # the training base
+    preview_base: Any = None
 
     # --- filled by dataset_phase ---
     bucket_mgr: Any = None

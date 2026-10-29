@@ -212,6 +212,7 @@ GROUP_ORDER: list[tuple[str, str, bool]] = [
     ("noise_augmentation", "Noise Augmentation", False),
     ("timestep_sampling", "Timestep Sampling", False),
     ("loss", "Loss", False),
+    ("krea2_layers", "Trained layers (Krea2)", False),
     ("system", "System & Performance", False),
     ("output", "Output & Saving", False),
     ("sample", "Sampling", False),

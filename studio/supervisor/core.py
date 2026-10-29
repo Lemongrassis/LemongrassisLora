@@ -107,6 +107,26 @@ def _tail_log_for_error_msg(log_path: Path, max_lines: int = 12, max_chars: int 
         return ""
 
 
+_DEFAULT_CRASH_AUTO_RESTARTS = 1
+
+
+def _crash_auto_restart_limit(task_id: int, cfg_path: Path) -> int:
+    """``crash_auto_restarts`` from the task's frozen config snapshot (falls back to its
+    config yaml, then to the default). 0 turns crash restarts off."""
+    try:
+        from ..services import task_snapshot
+        snap = task_snapshot.read_snapshot_config(task_id)
+        cfg = snap["config"] if snap else None
+        if cfg is None and cfg_path.exists():
+            import yaml
+            cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        value = (cfg or {}).get("crash_auto_restarts", _DEFAULT_CRASH_AUTO_RESTARTS)
+        return max(0, int(_DEFAULT_CRASH_AUTO_RESTARTS if value is None else value))
+    except Exception:
+        logger.exception("reading crash_auto_restarts failed for task %s", task_id)
+        return _DEFAULT_CRASH_AUTO_RESTARTS
+
+
 class Supervisor:
     POLL_INTERVAL = 1.0
     TERMINATE_GRACE = 30.0
@@ -656,7 +676,13 @@ class Supervisor:
             # we no longer write new files there.
             log_path = task_log_path(task["id"])
             log_path.parent.mkdir(parents=True, exist_ok=True)
-            log_fp = open(log_path, "wb")
+            # A resumed run (pause, manual resume, crash restart) keeps the previous
+            # run's log -- crash traceback included -- and appends to it; the tailer
+            # then starts past the old content so the previous run's lines and
+            # __EVENT__ markers aren't replayed.
+            restarting = bool(task.get("paused_state_path") or task.get("auto_restart_streak"))
+            log_start = log_path.stat().st_size if restarting and log_path.exists() else 0
+            log_fp = open(log_path, "ab" if restarting else "wb")
 
             # Before training: if the task has validation metrics enabled with a
             # split ratio set, carve out a held-out set from train/ into validation/
@@ -691,7 +717,9 @@ class Supervisor:
             tid = task["id"]
 
             # PP6.4 -- log tail -> SSE (replaces the frontend's old 2s log polling)
-            slot.tailer = LogTailer(log_path, self._make_task_log_callback(slot, tid))
+            slot.tailer = LogTailer(
+                log_path, self._make_task_log_callback(slot, tid), start_offset=log_start,
+            )
             slot.tailer.start()
 
             # PP6.4 -> PR #37: monitor_state.json changes -> SSE monitor_progress (delta protocol)
@@ -1503,6 +1531,10 @@ class Supervisor:
         else:
             status = "failed"
 
+        if kind == "task" and status == "failed" and self._maybe_auto_restart(slot, cid, rc):
+            slot.reset()
+            return
+
         if kind == "task":
             with db.connection_for(self._db_path) as conn:
                 fields: dict[str, Any] = {
@@ -1717,6 +1749,103 @@ class Supervisor:
                 )
         except Exception:
             logger.exception("task %s last_state persist failed", task_id)
+
+    def _maybe_auto_restart(self, slot: _Slot, task_id: int, rc: int) -> bool:
+        """A training run crashed: put it back in the queue from its latest recovery point.
+
+        Conditions:
+          - a train task whose run got as far as the training loop (a crash during
+            setup -- bad config, missing file -- would just fail again)
+          - the config's ``crash_auto_restarts`` (default 1, 0 = off) allows another
+            restart since the task was last started by hand (the manual resume
+            endpoint resets the count; after that the task stays failed and the
+            user resumes it from the same point)
+
+        Resumes from last_state_* (the auto recovery point, refreshed every epoch and
+        every ``auto_state_every_minutes``) through the paused_* pipeline, like the
+        manual resume endpoint; with no recovery point yet the run starts over. The
+        task goes straight back to pending at the head of the queue, so the version
+        isn't finalized as failed. Returns True when the task was requeued.
+        """
+        try:
+            with db.connection_for(self._db_path) as conn:
+                task = db.get_task(conn, task_id)
+                if not task or (task.get("task_type") or "train") != "train":
+                    return False
+                if not slot.train_loop_started:
+                    return False
+                limit = _crash_auto_restart_limit(task_id, self._resolve_task_config_path(task))
+                streak = int(task.get("auto_restart_streak") or 0)
+                if streak >= limit:
+                    return False
+
+                state_path = task.get("last_state_path")
+                config_path = task.get("last_config_path")
+                if not state_path or not Path(state_path).exists() or (
+                    config_path and not Path(config_path).exists()
+                ):
+                    state_path = config_path = None
+                resume_step = task.get("last_state_step") if state_path else None
+
+                new_log = task_log_path(task_id)
+                tail_src = new_log if new_log.exists() else self._logs_dir / f"{task_id}.log"
+                tail = _tail_log_for_error_msg(tail_src)
+                crash_msg = f"exit code {rc}\n{tail}" if tail else f"exit code {rc}"
+
+                attempt = streak + 1
+                top = conn.execute(
+                    "SELECT MAX(priority) FROM tasks WHERE status = 'pending'"
+                ).fetchone()[0]
+                extra: dict[str, Any] = {}
+                if not state_path:
+                    # starting over: forget a stale/missing point so the first new
+                    # one counts as progress
+                    extra = dict(last_state_path=None, last_config_path=None,
+                                 last_state_epoch=None, last_state_step=None)
+                db.update_task(
+                    conn, task_id,
+                    **extra,
+                    status="pending",
+                    exit_code=rc,
+                    pid=None,
+                    started_at=None,
+                    finished_at=None,
+                    priority=max(int(task.get("priority") or 0), int(top or 0) + 1),
+                    paused_state_path=state_path,
+                    paused_config_path=config_path,
+                    paused_step=resume_step,
+                    auto_restarts=int(task.get("auto_restarts") or 0) + 1,
+                    auto_restart_streak=attempt,
+                    last_crash_msg=crash_msg,
+                )
+        except Exception:
+            logger.exception("auto restart check failed for task %s", task_id)
+            return False
+
+        where = f"step {resume_step}" if state_path else "the beginning (no recovery point yet)"
+        note = (
+            f"\n[auto-restart] training crashed (exit code {rc}); restarting from {where}, "
+            f"attempt {attempt}/{limit}\n"
+        )
+        try:
+            with open(task_log_path(task_id), "ab") as fp:
+                fp.write(note.encode("utf-8"))
+        except Exception:
+            pass
+        logger.warning(
+            "task %d crashed (rc=%d), auto restart %d/%d from %s",
+            task_id, rc, attempt, limit, where,
+        )
+        self._on_event({
+            "type": "task_auto_restarted",
+            "task_id": task_id,
+            "attempt": attempt,
+            "limit": limit,
+            "step": resume_step,
+            "exit_code": rc,
+        })
+        self._on_event({"type": "task_state_changed", "task_id": task_id, "status": "pending"})
+        return True
 
     def _clear_pause_fields(self, task_id: int) -> None:
         """Clear the db `paused_*` fields (ADR Section 5.5 / Addendum 2 revision).

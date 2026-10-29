@@ -108,6 +108,11 @@ def _load_dit(ctx: TrainingContext) -> None:
         repo_root=ctx.repo_root,
         **extra,
     )
+    # Previews on another base (Krea2 Turbo): checked here so a wrong file
+    # fails at startup, not at the first preview
+    make_preview_base = getattr(ctx.family, "preview_base", None)
+    if callable(make_preview_base):
+        ctx.preview_base = make_preview_base(args, ctx.model)
     # Return large-weight mmap cache pages to the system (13-26GB; a real hang-on-paging
     # case observed in the field, and training benefits from it too).
     from training.sysmem import trim_working_set
@@ -182,6 +187,28 @@ def _setup_block_swap(ctx: TrainingContext) -> None:
     log_vram("after block swap attach", ctx.device)
 
 
+def _setup_partial_checkpoint(ctx: TrainingContext) -> None:
+    """Partial gradient checkpointing (Anima): the leading DiT blocks skip the recompute.
+
+    Runs after block swap so the swapped-out trailing blocks are known: they
+    always stay checkpointed (see partial_checkpoint_blocks). Low VRAM keeps
+    every block checkpointed.
+    """
+    args = ctx.args
+    if not (getattr(args, "grad_checkpoint", False) and getattr(args, "grad_checkpoint_partial", False)):
+        return
+    if getattr(args, "low_vram", False) or ctx.family.spec.family_id != "anima":
+        return
+    from training.families.anima.forward import partial_checkpoint_blocks
+
+    total = len(ctx.model.blocks)
+    swapped = ctx.block_swap.num_swap if ctx.block_swap is not None else 0
+    skip = partial_checkpoint_blocks(total, getattr(args, "grad_checkpoint_skip_pct", 0), swapped)
+    ctx.model.checkpoint_skip_blocks = skip
+    logger.info("partial checkpointing: %d of %d blocks without checkpointing (%d swapped to RAM)",
+                skip, total, swapped)
+
+
 def _inject_adapter(ctx: TrainingContext) -> None:
     args = ctx.args
     logger.info("Injecting %s...", args.lora_type.upper())
@@ -231,6 +258,7 @@ def _inject_adapter(ctx: TrainingContext) -> None:
         logger.info("continuing training from an existing LoRA: %s", args.resume_lora)
 
     _setup_block_swap(ctx)
+    _setup_partial_checkpoint(ctx)
 
     if getattr(args, "sra_enabled", False):
         from training.families.anima.sra_align import SRAAligner

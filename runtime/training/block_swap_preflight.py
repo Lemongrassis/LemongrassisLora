@@ -303,3 +303,66 @@ def run(ctx) -> None:
             _gb(result.current.vram_need),
             _gb(result.current.pinned_need),
         )
+
+
+#: VRAM kept free next to the resident weights when the generate daemon picks a
+#: swap count: sampling activations at large resolutions, VAE decode, LoRA merge
+#: temporaries, allocator slack. Smaller than the training headroom: no
+#: gradients, no optimizer state.
+_INFERENCE_HEADROOM_BYTES = 3 * _GIB
+
+
+def pick_inference_blocks(
+    *,
+    file_bytes: int,
+    total_blocks: int,
+    ratio_fn: Callable[[int], float],
+    free_vram_bytes: Optional[int],
+    headroom_bytes: int = _INFERENCE_HEADROOM_BYTES,
+) -> int:
+    """Pure arithmetic: the smallest swap count whose resident weights + the two
+    GPU slots + ``headroom_bytes`` fit in ``free_vram_bytes``.
+
+    0 when the whole model fits (or nothing is known); ``total_blocks`` when
+    even swapping everything is short (best effort, the OOM message then is
+    the honest answer).
+    """
+    if file_bytes <= 0 or total_blocks <= 0 or free_vram_bytes is None:
+        return 0
+    # A homogeneous DiT: one block is ratio(1) of the file; the swap keeps two
+    # GPU slots of that size (double buffering)
+    slot_bytes = 2 * int(file_bytes * min(max(float(ratio_fn(1)), 0.0), 1.0))
+    for blocks in range(total_blocks + 1):
+        ratio = min(max(float(ratio_fn(blocks)), 0.0), 1.0)
+        need = int(file_bytes * (1.0 - ratio)) + headroom_bytes
+        if blocks > 0:
+            need += slot_bytes
+        if free_vram_bytes >= need:
+            return blocks
+    return total_blocks
+
+
+def inference_blocks_to_swap(family, transformer_path: str) -> int:
+    """Generate-side auto swap count for ``family`` (0 = load the DiT whole).
+
+    Same skip rules as ``run``: no block_swap capability, missing estimators,
+    or a failed query -> 0 (the old full-load behavior).
+    """
+    if family is None or "block_swap" not in family.spec.capabilities:
+        return 0
+    ratio_fn = getattr(family, "swapped_param_ratio", None)
+    blocks_fn = getattr(family, "swappable_blocks", None)
+    if ratio_fn is None or blocks_fn is None:
+        return 0
+    from training import sysmem
+
+    try:
+        return pick_inference_blocks(
+            file_bytes=sysmem._file_bytes([transformer_path]),
+            total_blocks=int(blocks_fn(checkpoint_path=transformer_path)),
+            ratio_fn=lambda n: float(ratio_fn(n, checkpoint_path=transformer_path)),
+            free_vram_bytes=sysmem.gpu_free_bytes_global(),
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("inference block swap estimate failed, loading the DiT whole", exc_info=True)
+        return 0

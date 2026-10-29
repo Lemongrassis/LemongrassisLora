@@ -2018,7 +2018,9 @@ class MiniTrainDIT(nn.Module):
             tuple(visual_seqlens), tuple(text_seqlens)
         )
 
-        for block in self.blocks:
+        # partial checkpointing: leading blocks keep activations (see training/families/anima/forward.py)
+        skip = int(getattr(self, "checkpoint_skip_blocks", 0) or 0)
+        for i, block in enumerate(self.blocks):
             # Routed through ``__call__`` (``packed_tokens=True`` → ``forward_tokens``),
             # never ``blk.forward_tokens(...)`` directly: block swap's prefetch/release
             # hooks fire on ``__call__`` only. Mirrors the dense checkpointed loop in
@@ -2037,7 +2039,7 @@ class MiniTrainDIT(nn.Module):
                     token_wise_mod=True,
                     mod_index=mod_index,
                 )
-            if use_checkpoint:
+            if use_checkpoint and i >= skip:
                 x_1_N_D = checkpoint(_run, x_1_N_D, use_reentrant=False)
             else:
                 x_1_N_D = _run(x_1_N_D)

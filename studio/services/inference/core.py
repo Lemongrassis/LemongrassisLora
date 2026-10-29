@@ -249,6 +249,7 @@ def apply_loras(
     dtype: Any,
     family_id: str = "anima",
     *, text_stack: Any = None,
+    int8_keep_backup: bool = True,
 ) -> list[Any]:
     """Inject a separate AnimaLycorisAdapter for each LoRA; forward-time hooks
     accumulate the deltas.
@@ -262,6 +263,10 @@ def apply_loras(
       - LycorisNetwork.multiplier is the global multiplier read at forward time
       - a per-lora-module fallback is also set (different lycoris versions read
         it from different places)
+
+    ``int8_keep_backup``: an int8 base merge keeps a CPU copy of the original
+    weights so a LoRA change can restore in place; False skips that copy (the
+    daemon then reloads the DiT on a LoRA change), used when RAM is tight.
 
     Returns the adapter list -- the caller **must keep a reference** to it,
     otherwise once Python's GC runs, the LycorisNetwork inside each
@@ -282,7 +287,9 @@ def apply_loras(
     if specs:
         from training.families.krea2.quant_fp8 import model_has_fp8_layers  # noqa: PLC0415
 
-        fp8_merge = family_id == "krea2" and model_has_fp8_layers(model)
+        # mxfp8 / plain int8 bases keep the LoRA as a bypass branch (no merge path)
+        fp8_merge = (family_id == "krea2" and model_has_fp8_layers(model)
+                     and not getattr(model, "lora_bypass_only", False))
 
     merge_sources: list[tuple[dict, float, str]] = []
     # Detachable hooks that live beside a merged base (MOSS per-block modulation)
@@ -444,7 +451,10 @@ def apply_loras(
                 from training.families.moss_image.lora_int8_merge import merge_loras_into_int8_model
             else:
                 from training.families.lora_int8_merge import merge_loras_into_int8_model
-            return [merge_loras_into_int8_model(model, merge_sources), *extra_handles]
+            return [
+                merge_loras_into_int8_model(model, merge_sources, keep_backup=int8_keep_backup),
+                *extra_handles,
+            ]
         from training.families.krea2.lora_fp8_merge import (  # noqa: PLC0415
             merge_loras_into_fp8_model,
         )

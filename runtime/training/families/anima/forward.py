@@ -9,8 +9,24 @@ the checkpoint unrolling strategy is model-private).
 from __future__ import annotations
 
 
+def partial_checkpoint_blocks(total: int, skip_pct: int, swapped: int = 0) -> int:
+    """How many leading blocks run without checkpointing under partial checkpointing.
+
+    Only the leading blocks are exempt: block swap offloads the trailing
+    ``swapped`` blocks, and those must stay checkpointed -- without the
+    recompute, autograd would keep references to the shared GPU slot buffers
+    that the next swapped block overwrites.
+    """
+    skip = total * max(0, min(100, int(skip_pct))) // 100
+    return max(0, min(skip, total - max(0, int(swapped))))
+
+
 def forward_with_optional_checkpoint(model, latents, timesteps, cross, padding_mask, use_checkpoint=False):
-    """Forward pass with optional gradient checkpointing."""
+    """Forward pass with optional gradient checkpointing.
+
+    ``model.checkpoint_skip_blocks`` (set by partial checkpointing) leaves that
+    many leading blocks un-checkpointed.
+    """
     if not use_checkpoint:
         return model(latents, timesteps, cross, padding_mask=padding_mask)
     from torch.utils.checkpoint import checkpoint
@@ -29,10 +45,14 @@ def forward_with_optional_checkpoint(model, latents, timesteps, cross, padding_m
         "extra_per_block_pos_emb": extra_pos_emb,
     }
 
-    for block in model.blocks:
+    skip = int(getattr(model, "checkpoint_skip_blocks", 0) or 0)
+    for i, block in enumerate(model.blocks):
         def custom_forward(x, blk=block):
             return blk(x, t_embedding, cross, **block_kwargs)
-        x_B_T_H_W_D = checkpoint(custom_forward, x_B_T_H_W_D, use_reentrant=False)
+        if i < skip:
+            x_B_T_H_W_D = custom_forward(x_B_T_H_W_D)
+        else:
+            x_B_T_H_W_D = checkpoint(custom_forward, x_B_T_H_W_D, use_reentrant=False)
 
     x_B_T_H_W_O = model.final_layer(x_B_T_H_W_D, t_embedding, adaln_lora_B_T_3D=adaln_lora)
     return model.unpatchify(x_B_T_H_W_O)

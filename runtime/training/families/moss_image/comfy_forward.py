@@ -31,6 +31,8 @@ from torch import Tensor
 from torch.nn import functional as F
 
 from modeling.moss_image.attention import AttentionParams, attention
+
+from ...block_swap import find_block_swap
 SDPA = "torch"
 
 def attention_bshd(q, k, v, backend, *, stage=None):
@@ -211,14 +213,22 @@ def comfy_forward(model, x: Tensor, timestep: Tensor, context: Tensor, *,
     skip = frozenset(skip_layers or ())
     # Per-block modulation offsets (experimental.BlockModulation); empty for ordinary LoRAs
     block_mods = getattr(model, "_moss_block_mods", None) or ()
-    for index, block in enumerate(model.layers):
-        if index in skip:
-            continue
+    # This loop calls the block internals, not block(...), so block swap's forward hooks never
+    # fire: stream the swapped blocks in explicitly (no-op for resident ones)
+    swap = find_block_swap(model)
+    order = [index for index in range(len(model.layers)) if index not in skip]
+    for position, index in enumerate(order):
+        block = model.layers[index]
+        if swap is not None:
+            nxt = order[position + 1] if position + 1 < len(order) else None
+            swap.ensure_resident(index, prefetch_next=nxt)
         block_mod = mod
         for adapter in block_mods:
             delta = adapter.delta(index, vec).unbind(1)
             block_mod = tuple(m + d.unsqueeze(1).to(m.dtype) for m, d in zip(block_mod, delta))
         hidden = _dit_block(block, hidden, block_mod, pe, backend)
+        if swap is not None:
+            swap.release(index)
 
     out = model.final_linear_video(
         _rms_adaln(hidden[:, :h * w], model.final_norm_video.weight, head_scale, head_shift)

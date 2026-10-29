@@ -46,7 +46,7 @@ const rank = (list: string[], f: string) => { const i = list.indexOf(f); return 
 const SUBGROUPS: Record<string, Subgroup[]> = {
   model: [
     { key: 'modelMain', fields: [], rest: true },
-    { key: 'modelQuantization', fields: ['transformer_quantization', 'text_encoder_quantization'] },
+    { key: 'modelQuantization', fields: ['transformer_quantization', 'text_encoder_quantization', 'int8_train_matmul'] },
   ],
   lora: [
     { key: 'loraMain', fields: ['lora_type', 'lora_rank', 'lora_alpha', 'lokr_factor', 'tlora_min_rank', 'tlora_alpha_rank_scale', 'tlora_use_ortho'], rest: true },
@@ -59,7 +59,8 @@ const SUBGROUPS: Record<string, Subgroup[]> = {
     { key: 'regSet', fields: ['reg_caption', 'reg_weight'] },
   ],
   training: [
-    { key: 'trainMain', fields: ['epochs', 'max_steps', 'batch_size', 'grad_accum', 'grad_checkpoint'] },
+    { key: 'trainMain', fields: ['epochs', 'max_steps', 'batch_size', 'grad_accum'] },
+    { key: 'trainCheckpoint', fields: ['grad_checkpoint', 'grad_checkpoint_partial', 'grad_checkpoint_skip_pct'], switchesFirst: true },
     { key: 'trainLr', fields: ['learning_rate', 'lr_scheduler', 'lr_scheduler_eta_min', 'optimizer_type'], rest: true },
     { key: 'trainTextEncoder', fields: ['train_text_encoder', 'text_encoder_lr'], switchesFirst: true },
     { key: 'trainEma', fields: ['ema_enabled', 'ema_decay', 'ema_start_ratio'], switchesFirst: true },
@@ -73,8 +74,12 @@ const SUBGROUPS: Record<string, Subgroup[]> = {
     { key: 'sysOpt', fields: ['vae_cache_batch_size', 'blocks_to_swap', 'vae_tiling', 'navit_packing', 'kv_trim'], rest: true },
   ],
   output: [
-    { key: 'outMain', fields: ['save_every_epochs', 'save_every_steps', 'save_state_every_epochs', 'save_state_every_steps', 'seed'], rest: true },
+    { key: 'outMain', fields: ['save_every_epochs', 'save_every_steps', 'save_state_every_epochs', 'save_state_every_steps', 'auto_state_every_minutes', 'crash_auto_restarts', 'seed'], rest: true },
     { key: 'outResume', fields: ['resume_lora', 'resume_state'] },
+  ],
+  sample: [
+    { key: 'sampleMain', fields: [], rest: true },
+    { key: 'sampleBase', fields: ['sample_base', 'sample_turbo_path', 'sample_turbo_steps', 'sample_turbo_cfg'] },
   ],
 }
 

@@ -114,6 +114,7 @@ export const SCHEMA_GROUP_LABEL_KEYS: Record<string, string> = {
   monitor: 'schema.groups.monitor',
   experimental: 'schema.groups.experimental',
   experimental_blocks: 'schema.groups.experimentalBlocks',
+  krea2_layers: 'schema.groups.krea2Layers',
 }
 
 export const SCHEMA_ENUM_LABEL_KEYS: Record<string, Record<string, string>> = {
@@ -166,6 +167,14 @@ export const SCHEMA_ENUM_LABEL_KEYS: Record<string, Record<string, string>> = {
     none: 'schema.enums.text_encoder_quantization.none',
     convrot_int8: 'schema.enums.text_encoder_quantization.convrot_int8',
     qfloat8: 'schema.enums.text_encoder_quantization.qfloat8',
+  },
+  int8_train_matmul: {
+    w8a8: 'schema.enums.int8_train_matmul.w8a8',
+    w8a16: 'schema.enums.int8_train_matmul.w8a16',
+  },
+  sample_base: {
+    train: 'schema.enums.sample_base.train',
+    turbo: 'schema.enums.sample_base.turbo',
   },
   timestep_sampling: {
     logit_normal: 'schema.enums.timestepSampling.logitNormal',

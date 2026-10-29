@@ -49,6 +49,7 @@ for _p in (_THIS_DIR, _REPO_ROOT):
         sys.path.insert(0, s)
 
 import anima_train as _T  # noqa: E402
+from training.block_swap import find_block_swap, move_module_excluding  # noqa: E402
 
 from studio.domain.comfy_parity import force_comfy_parity_runtime_config  # noqa: E402
 from studio.services.inference.core import LoRAMeta, LoRASpec, apply_loras, read_lora_meta  # noqa: E402
@@ -227,6 +228,8 @@ class ModelCache:
         self.text_encoder_backend: Optional[str] = None
         self.t5_tokenizer_backend: Optional[str] = None
         self.ram_guard: bool = False
+        # Trailing DiT blocks kept in pinned RAM (block swap); decided at load time
+        self.blocks_to_swap: int = 0
         #: Identity key for the TE-first stack (family_id, text_encoder_path)
         #: -- ensure_text_ready reuses/rebuilds based on this; _load uses it
         #: to avoid a duplicate load
@@ -285,10 +288,17 @@ class ModelCache:
         dtype = _torch_dtype_from_precision(cfg.get("mixed_precision", "bf16"))
         family = _T.get_family(family_id)
         logger.info("loading text encoders (TE-first) %s", text_encoder_path)
+        # Family-sized loading for the card at hand (MOSS: trailing TE layers
+        # stream from RAM when the encoder does not fit)
+        text_options_fn = getattr(family, "generate_text_options", None)
+        text_options = text_options_fn(text_encoder_path) if callable(text_options_fn) and device == "cuda" else {}
+        if text_options:
+            logger.info("text encoder options for this card: %s", text_options)
         self.text_stack = family.load_text(
             text_encoder_path, device, dtype,
             purpose="generate",
             cache_enabled=False,
+            **text_options,
         )
         self._text_ready_key = key
         self.text_encoder_path = text_encoder_path
@@ -339,14 +349,23 @@ class ModelCache:
         if needs_reload:
             from training.sysmem import check_load_budget
 
+            # keep_text: the TE-first stack just finished encoding (the LRU
+            # is populated), a reload shouldn't clear it. Unload before
+            # budgeting: the auto swap count reads free VRAM, which must not
+            # still include the previous model.
+            self.unload(keep_text=True)
+            family = _T.get_family(family_id)
+            blocks_to_swap = _resolve_blocks_to_swap(cfg, family, transformer_path)
+            ratio_fn = getattr(family, "swapped_param_ratio", None)
             check_load_budget(
                 self.ram_guard,
                 weight_paths=[transformer_path, vae_path],
                 stage="model load",
+                vram_discount_ratio=(
+                    float(ratio_fn(blocks_to_swap, checkpoint_path=transformer_path))
+                    if blocks_to_swap > 0 and ratio_fn is not None else 0.0
+                ),
             )
-            # keep_text: the TE-first stack just finished encoding (the LRU
-            # is populated), a reload shouldn't clear it
-            self.unload(keep_text=True)
             self._load(
                 family_id=family_id,
                 transformer_path=transformer_path,
@@ -358,6 +377,7 @@ class ModelCache:
                 vae_precision=vae_precision,
                 text_encoder_backend=text_encoder_backend,
                 t5_tokenizer_backend=t5_tokenizer_backend,
+                blocks_to_swap=blocks_to_swap,
             )
             _emit_evt("loaded")
 
@@ -374,8 +394,11 @@ class ModelCache:
         vae_precision: str,
         text_encoder_backend: str,
         t5_tokenizer_backend: str,
+        blocks_to_swap: int = 0,
     ) -> None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
+        if device != "cuda":
+            blocks_to_swap = 0
         dtype = _torch_dtype_from_precision(precision)
         vae_dtype = _torch_dtype_from_precision(vae_precision)
         repo_root = _T.find_diffusion_pipe_root()
@@ -388,7 +411,21 @@ class ModelCache:
             transformer_path, device, dtype,
             attention_backend=("flash_attn" if use_flash else "none"), repo_root=repo_root,
             purpose="generate",
+            **({"blocks_to_swap": blocks_to_swap} if blocks_to_swap > 0 else {}),
         )
+        if blocks_to_swap > 0:
+            from training.block_swap import PinnedBlockSwap
+
+            # The loader already put the trailing blocks in pinned RAM; the
+            # swap takes them over in place and streams them in per forward
+            swap = PinnedBlockSwap(
+                model.blocks, min(blocks_to_swap, len(model.blocks)), device,
+            )
+            swap.attach()
+            logger.info(
+                "block swap for generation: %d/%d blocks in RAM (%.2f GB pinned)",
+                swap.num_swap, swap.total, swap.pinned_bytes / 1024**3,
+            )
         if use_xformers and not _T.enable_xformers(model):
             raise RuntimeError(
                 "Exact ComfyUI KSampler parity is guaranteed only with xformers, "
@@ -433,6 +470,7 @@ class ModelCache:
         self.vae_precision = vae_precision
         self.text_encoder_backend = text_encoder_backend
         self.t5_tokenizer_backend = t5_tokenizer_backend
+        self.blocks_to_swap = blocks_to_swap
         self.device = device
         self.dtype = dtype
         self.lora_dtype = torch.float32
@@ -492,6 +530,13 @@ class ModelCache:
                 self.model.eval()
                 return self.adapters
 
+        # Under block swap, swapped layers' .data may point at a rotating GPU
+        # slot: detach-restore and merge must write the pinned masters, or
+        # the next swap-in silently overwrites them
+        swap = find_block_swap(self.model)
+        if swap is not None:
+            swap.restore_masters()
+
         all_detached = True
         for adapter in self.adapters:
             try:
@@ -516,6 +561,7 @@ class ModelCache:
             # required parameter of _load that this code path missed
             # updating when P4-4 was introduced)
             saved_family = self.family_id or "anima"
+            saved_swap = self.blocks_to_swap
             self.unload()
             self._load(
                 family_id=saved_family,
@@ -528,6 +574,7 @@ class ModelCache:
                 vae_precision=saved_paths[6] or saved_paths[5],
                 text_encoder_backend=saved_paths[7] or "hf",
                 t5_tokenizer_backend=saved_paths[8] or "slow",
+                blocks_to_swap=saved_swap,
             )
             _emit_evt("loaded")
         self.last_lora_specs = []
@@ -536,6 +583,7 @@ class ModelCache:
         self.adapters = apply_loras(
             self.model, specs, self.device, self.lora_dtype,
             family_id=self.family_id or "anima",
+            int8_keep_backup=self._can_keep_merge_backup(),
             **({"text_stack": self.text_stack} if any(meta.has_text_encoder for meta in current_metas) else {}),
         )
         self.last_lora_specs = specs
@@ -543,10 +591,27 @@ class ModelCache:
         self.model.eval()
         return self.adapters
 
+    def _can_keep_merge_backup(self) -> bool:
+        """Whether an int8 LoRA merge may keep its model-sized CPU backup.
+
+        The backup makes swapping LoRAs a restore instead of a DiT reload. With
+        block swap the swapped half already sits in pinned RAM, so a second
+        full copy is only kept when RAM clearly has room for it.
+        """
+        if self.blocks_to_swap <= 0:
+            return True
+        from training.sysmem import _file_bytes, available_ram_bytes
+
+        avail = available_ram_bytes()
+        need = _file_bytes([self.transformer_path or ""])
+        return avail is not None and avail > need + 6 * 1024**3
+
     def _move_runtime_to_device(self) -> None:
         if not self.device:
             return
-        _move_module_to_device(self.model, self.device)
+        # Skips block-swapped weights: a blanket .to() would pull the pinned
+        # masters onto the card and OOM exactly where the swap was needed
+        move_module_excluding(self.model, self.device, find_block_swap(self.model))
         # anima's text stack is a (qwen_model, qwen_tok, t5_tok) triple --
         # the decode offload inside sampling moves the TE to CPU, this moves
         # it back. A stack that manages its own device (krea2's
@@ -577,6 +642,12 @@ class ModelCache:
             _reclaim_cuda_leftovers()
             return
         logger.info("unloading model")
+        swap = find_block_swap(self.model)
+        if swap is not None:
+            # Drop hooks and the pinned masters; the pinned host cache is
+            # returned to the OS below (gc alone returns 0 bytes, doc §9.7)
+            swap.close()
+        self.blocks_to_swap = 0
         self.model = None
         self.vae = None
         self.family_id = None
@@ -601,8 +672,26 @@ class ModelCache:
                 except Exception:
                     pass
                 torch.cuda.empty_cache()
+            if swap is not None:
+                from training.block_swap import release_pinned_host_cache
+
+                release_pinned_host_cache()
         except Exception:
             pass
+
+
+def _resolve_blocks_to_swap(cfg: dict[str, Any], family: Any, transformer_path: str) -> int:
+    """Swap count for the next DiT load: an explicit ``blocks_to_swap`` >= 0
+    in cfg wins; otherwise the smallest count that fits the free VRAM (0 when
+    the model fits whole, e.g. on 24GB cards)."""
+    explicit = cfg.get("blocks_to_swap")
+    if explicit is not None and int(explicit) >= 0:
+        return int(explicit)
+    if not torch.cuda.is_available():
+        return 0
+    from training.block_swap_preflight import inference_blocks_to_swap
+
+    return inference_blocks_to_swap(family, transformer_path)
 
 
 def _reclaim_cuda_leftovers() -> None:
@@ -1171,7 +1260,9 @@ def _run_xy(
     if CACHE.model is not None:
         from training.families.krea2.quant_fp8 import model_has_fp8_layers
 
-        fp8_model = (model_has_fp8_layers(CACHE.model) and not getattr(CACHE.model, "is_qfloat8", False)) or bool(getattr(CACHE.model, "is_convrot_int8", False))
+        fp8_model = ((model_has_fp8_layers(CACHE.model) and not getattr(CACHE.model, "is_qfloat8", False)
+                      and not getattr(CACHE.model, "lora_bypass_only", False))
+                     or bool(getattr(CACHE.model, "is_convrot_int8", False)))
 
     if base_seed == 0:
         base_seed = random.randint(0, 2**31 - 1)

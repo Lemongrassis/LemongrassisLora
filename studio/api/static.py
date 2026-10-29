@@ -26,6 +26,10 @@ mimetypes.add_type("image/svg+xml", ".svg")
 # be added here.**
 _RESERVED_SEGMENTS = frozenset({"api", "samples"})
 
+# index.html names the hashed bundles; without this the browser heuristically
+# caches it and keeps loading the previous build after a rebuild.
+INDEX_HEADERS = {"Cache-Control": "no-cache"}
+
 
 class SPAStaticFiles(StaticFiles):
     """SPA routing fallback: returns index.html when no actual file matches
@@ -63,4 +67,4 @@ class SPAStaticFiles(StaticFiles):
             last = norm.rsplit("/", 1)[-1]
             if "." in last:
                 raise
-            return FileResponse(Path(self.directory) / "index.html")
+            return FileResponse(Path(self.directory) / "index.html", headers=INDEX_HEADERS)

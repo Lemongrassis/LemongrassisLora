@@ -13,8 +13,9 @@ Public:
 from __future__ import annotations
 
 import logging
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 import torch
 
@@ -53,6 +54,32 @@ def _edit_references(ctx: TrainingContext) -> list:
     return out
 
 
+@contextmanager
+def preview_base_scope(ctx: TrainingContext) -> Iterator[bool]:
+    """Keep the preview base (Krea2 Turbo) swapped in for the body.
+
+    Yields False when it can't be swapped in (the training weights are intact;
+    previews are skipped rather than drawn on the training base with Turbo
+    settings). Without a preview base, or nested inside another scope, it's a
+    no-op yielding True. Restoring the training weights happens on exit; if
+    that fails the error propagates and stops training.
+    """
+    base = getattr(ctx, "preview_base", None)
+    if base is None or base.active:
+        yield True
+        return
+    with ExitStack() as stack:
+        try:
+            stack.enter_context(base.swapped())
+        except base.Unavailable as exc:
+            logger.warning("Preview base %s could not be loaded, preview skipped: %s",
+                           base.preview_path.name, exc)
+            ctx.emit(f"Preview skipped: {base.preview_path.name} could not be loaded")
+            yield False
+            return
+        yield True
+
+
 def run_sample(
     ctx: TrainingContext,
     *,
@@ -70,10 +97,29 @@ def run_sample(
     - wandb: log_image is called if wandb_key is given; caption / step are passed along too
     - monitor_state.json: always tries to push sample_path to the frontend preview
     - seed_offset: in baseline mode, offset by i so multiple test prompts produce different images
+    - preview base (Krea2 Turbo): swapped in around the sample, with its own steps / guidance
 
     sample_path must be decided by the caller (baseline numbering / step /
     epoch is not this function's concern).
     """
+    with preview_base_scope(ctx) as ready:
+        if ready:
+            _draw_sample(
+                ctx, prompt=prompt, sample_path=sample_path, wandb_key=wandb_key,
+                wandb_caption=wandb_caption, wandb_step=wandb_step, seed_offset=seed_offset,
+            )
+
+
+def _draw_sample(
+    ctx: TrainingContext,
+    *,
+    prompt: str,
+    sample_path: Path,
+    wandb_key: Optional[str],
+    wandb_caption: Optional[str],
+    wandb_step: Optional[int],
+    seed_offset: int,
+) -> None:
     args = ctx.args
     # resolution may be a list (multi-resolution); the sample preview uses the first (base) resolution.
     _res = args.resolution
@@ -108,6 +154,11 @@ def run_sample(
         getattr(args, "sample_scheduler", spec.sampling.default_scheduler)
         or spec.sampling.default_scheduler
     )
+    # Turbo previews: distilled sampling with Turbo's own steps / guidance
+    on_preview_base = getattr(ctx, "preview_base", None) is not None
+    if on_preview_base:
+        s_steps = int(getattr(args, "sample_turbo_steps", 8) or 8)
+        s_cfg = float(getattr(args, "sample_turbo_cfg", 0.0) or 0.0)
 
     # T-LoRA: matches ControlGenAI/T-LoRA's official inference -- the sample
     # stage should not apply the timestep mask. The official inferencer
@@ -150,6 +201,7 @@ def run_sample(
                 device=ctx.device, dtype=ctx.dtype,
                 seed=(s_seed + seed_offset) if s_seed else None,
                 **({"reference_images": references} if references else {}),
+                **({"distilled": True} if on_preview_base else {}),
             )
             img.save(sample_path)
             ctx.emit(f"Sample saved: {sample_path.name}")

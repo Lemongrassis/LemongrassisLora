@@ -5,6 +5,8 @@ Simple schedule and CFG order adapted from ComfyUI via WalkingMeatAxolotl/AnimaL
 import torch
 from modeling.moss_image.vae import unpatchify_latents
 
+from ...block_swap import find_block_swap, move_module_excluding
+
 def _sigma_grid(count: int, shift: float, total: int) -> torch.Tensor:
     lower = shift / (total + shift - 1)
     values = torch.linspace(1, lower, count, dtype=torch.float32)
@@ -68,8 +70,10 @@ def sample_image(model, vae, text, prompt, *, height=1024, width=1024, steps=Non
     prompts = [prompt] + ([negative_prompt] if cfg != 1 else [])
     # The inference path can yield the DiT. During training, prompts are pre-cached.
     yielded = vram_policy is not None and not text.online_conditions_cached(prompts)
+    # Swap-aware: block-swapped weights already live in pinned RAM and must not ride along
+    swap = find_block_swap(model)
     if yielded:
-        model.to("cpu")
+        move_module_excluding(model, "cpu", swap)
         if device.type == "cuda":
             torch.cuda.empty_cache()
     try:
@@ -77,7 +81,7 @@ def sample_image(model, vae, text, prompt, *, height=1024, width=1024, steps=Non
         text.release_model()
     finally:
         if yielded:
-            model.to(device)
+            move_module_excluding(model, device, swap)
     generator = torch.Generator(device="cpu")
     if seed is not None:
         generator.manual_seed(int(seed))

@@ -343,7 +343,7 @@ def test_model_cache_moves_offloaded_model_before_injecting_lora(tmp_path: Path,
         def load_state_dict(self, *_args, **_kwargs):
             return MagicMock(missing_keys=[], unexpected_keys=[])
 
-    def fake_apply_loras(model, specs, device, dtype, family_id="anima"):
+    def fake_apply_loras(model, specs, device, dtype, family_id="anima", **_kw):
         events.append("apply_loras")
         assert "model.to:cuda" in events
         assert dtype == torch.float32

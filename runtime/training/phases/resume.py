@@ -14,7 +14,7 @@ from pathlib import Path
 from training.bootstrap import init_progress
 from training.context import TrainingContext
 from training.observability import render_curve_panel
-from training.sample_runner import run_sample
+from training.sample_runner import preview_base_scope, run_sample
 from training.snapshot import build_auto_epoch_config_path, build_auto_epoch_state_path, emit_event
 from training.state import load_training_state
 
@@ -170,18 +170,20 @@ def run(ctx: TrainingContext) -> None:
     sampling_enabled = args.sample_steps > 0 or args.sample_every > 0
     if ctx.global_step == 0 and sampling_enabled:
         ctx.emit("Sampling (step 0, baseline)...")
-        for i, prompt in enumerate(ctx.sample_prompts[:3]):  # test at most 3
-            ctx.current_sample_refs = ctx.sample_refs[i] if ctx.sample_refs else None
-            sample_path = ctx.sample_dir / f"step_0_baseline_{i}.png"
-            run_sample(
-                ctx,
-                prompt=prompt,
-                sample_path=sample_path,
-                wandb_key="samples/baseline",
-                wandb_caption=f"step 0 baseline {i}: {prompt}",
-                wandb_step=0,
-                seed_offset=i,
-            )
+        # one preview-base swap (Krea2 Turbo) for all baseline prompts
+        with preview_base_scope(ctx) as ready:
+            for i, prompt in enumerate(ctx.sample_prompts[:3] if ready else []):  # test at most 3
+                ctx.current_sample_refs = ctx.sample_refs[i] if ctx.sample_refs else None
+                sample_path = ctx.sample_dir / f"step_0_baseline_{i}.png"
+                run_sample(
+                    ctx,
+                    prompt=prompt,
+                    sample_path=sample_path,
+                    wandb_key="samples/baseline",
+                    wandb_caption=f"step 0 baseline {i}: {prompt}",
+                    wandb_step=0,
+                    seed_offset=i,
+                )
     elif ctx.global_step > 0 and sampling_enabled:
         ctx.emit(f"Skipping startup baseline sampling (resumed from step {ctx.global_step}, not step 0)")
 

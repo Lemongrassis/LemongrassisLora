@@ -159,7 +159,7 @@ def quantize_weight_convrot(key: str, tensor: torch.Tensor, allowed_groupsizes: 
 class ConvRotInt8LinearFn(torch.autograd.Function):
     @staticmethod
     @torch.amp.custom_fwd(device_type="cuda")
-    def forward(ctx, x, wq, w_scale, bias, groupsize, bwd_mode):
+    def forward(ctx, x, wq, w_scale, bias, groupsize, bwd_mode, fwd_mode="int8"):
         # x: [..., K] bf16/fp16, wq: [N, K] int8 (rotated basis), w_scale: [N, 1] fp32
         # F.linear casts its inputs to the autocast dtype under autocast; the fused kernel bypasses F.linear, so replicate
         # that here (fp32 modulation outputs are promoted to fp32 otherwise).
@@ -168,7 +168,8 @@ class ConvRotInt8LinearFn(torch.autograd.Function):
             x = x.to(cast_dtype)
             if bias is not None:
                 bias = bias.to(cast_dtype)
-        if HAS_TRITON and x.is_cuda:
+        # fwd_mode "int8": fused W8A8 (activations quantized per row); "bf16": W8A16, the eager path below
+        if fwd_mode == "int8" and HAS_TRITON and x.is_cuda:
             out = int8_linear(x, wq, w_scale.reshape(-1), bias, x.dtype, True, groupsize)
         else:
             # eager fallback: rotation + transient dequantized matmul, no activation quantization
@@ -210,11 +211,14 @@ class ConvRotInt8LinearFn(torch.autograd.Function):
             grad_x = _rotate_activation(gx_rot, h, gs).reshape(*grad_out.shape[:-1], wq.shape[1])
 
         grad_bias = g2d.sum(dim=0) if ctx.bias_needs_grad else None
-        return grad_x, None, None, grad_bias, None, None
+        return grad_x, None, None, grad_bias, None, None, None
 
 
 def convrot_int8_linear_forward_patch(self: nn.Linear, x):
-    return ConvRotInt8LinearFn.apply(x, self.weight, self.scale_weight, self.bias, self._convrot_groupsize, self._convrot_bwd_mode)
+    return ConvRotInt8LinearFn.apply(
+        x, self.weight, self.scale_weight, self.bias, self._convrot_groupsize, self._convrot_bwd_mode,
+        getattr(self, "_convrot_fwd_mode", "int8"),
+    )
 
 
 def convrot_int8_embedding_forward_patch(self: nn.Embedding, input: torch.Tensor) -> torch.Tensor:
@@ -242,9 +246,10 @@ def _validate_convrot_bwd_mode(bwd_mode: str) -> None:
         )
 
 
-def _patch_convrot_int8_linear(module: nn.Linear, groupsize: int, bwd_mode: str) -> None:
+def _patch_convrot_int8_linear(module: nn.Linear, groupsize: int, bwd_mode: str, fwd_mode: str = "int8") -> None:
     module._convrot_groupsize = groupsize
     module._convrot_bwd_mode = bwd_mode
+    module._convrot_fwd_mode = fwd_mode
     module.forward = convrot_int8_linear_forward_patch.__get__(module, type(module))
 
 

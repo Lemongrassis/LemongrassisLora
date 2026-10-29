@@ -349,6 +349,11 @@ def run(ctx: TrainingContext) -> None:
             )
 
     bucket_switch = _BucketSwitchCacheRelease(ctx.device)
+    # Mid-epoch refresh of the automatic recovery point (0 = only at epoch ends):
+    # pause and crash restarts resume from the freshest one, mid-epoch points
+    # carry their batch offset so nothing is trained twice.
+    auto_state_every_s = max(0.0, float(getattr(args, "auto_state_every_minutes", 0) or 0)) * 60.0
+    last_auto_state_at = time.monotonic()
 
     for epoch in range(ctx.start_epoch, args.epochs):
         ctx.current_epoch = epoch
@@ -1015,6 +1020,15 @@ def run(ctx: TrainingContext) -> None:
                     ctx.emit(f"Saved training state (step {ctx.global_step}): {state_path.name}")
                     ctx.wandb_monitor.upload_state_manual(state_path)
 
+                # Time-based mid-epoch refresh of the automatic recovery point
+                if (
+                    auto_state_every_s > 0
+                    and time.monotonic() - last_auto_state_at >= auto_state_every_s
+                    and not (args.max_steps and ctx.global_step >= args.max_steps)
+                ):
+                    _write_auto_state(ctx, args, epoch, batch_idx + 1)
+                    last_auto_state_at = time.monotonic()
+
                 # Check max_steps
                 if args.max_steps and ctx.global_step >= args.max_steps:
                     break
@@ -1096,43 +1110,63 @@ def run(ctx: TrainingContext) -> None:
             # Addendum 2: writes to auto_state_dir() (the task's own
             # archive, tasks/<id>/state/; CLI falls back to state_dir()) --
             # the user's periodic save still goes through state_dir() above, unchanged.
-            auto_state_path = build_auto_epoch_state_path(ctx.auto_state_dir())
-            auto_config_path = build_auto_epoch_config_path(ctx.auto_state_dir())
-            monitor_data = None
-            if ctx.monitor_server:
-                try:
-                    from train_monitor import get_state
-                    monitor_data = get_state()
-                except Exception:
-                    pass
-            # Write the config snapshot first -- small and low failure probability
-            write_config_snapshot(auto_config_path, args, ctx.sample_prompts)
-            with optimizer_eval_mode(ctx.optimizer):
-                save_training_state(
-                    auto_state_path, ctx.injector, ctx.optimizer,
-                    ctx.current_epoch, ctx.global_step, ctx.loss_history,
-                    monitor_state=monitor_data, scheduler=ctx.scheduler,
-                    timestep_sampler=ctx.timestep_sampler,
-                    sra_aligner=ctx.sra_aligner,
-                    scaler=ctx.scaler,
-                    model_family=ctx.family.spec.family_id,
-                    ema=ctx.ema,
-                )
-            ctx.wandb_monitor.upload_state_auto(auto_state_path)
-            # Update ctx fields for handle_interrupt to use when emitting pause_state
-            ctx.last_auto_epoch_state_path = auto_state_path
-            ctx.last_auto_epoch_config_path = auto_config_path
-            # The supervisor's `_on_line` catches this event -> marks
-            # slot.last_auto_epoch_state_path -> the is_pausable upgrade
-            # condition is met -> SSE unlocks the UI pause button (ADR
-            # Addendum 1 SSUI)
-            emit_event("auto_epoch_backup_written", {
-                "state_path": str(auto_state_path),
-                "config_path": str(auto_config_path),
-                "epoch": ctx.current_epoch,
-                "step": ctx.global_step,
-            })
+            _write_auto_state(ctx, args, ctx.current_epoch, 0)
+            last_auto_state_at = time.monotonic()
 
         # Check max_steps
         if args.max_steps and ctx.global_step >= args.max_steps:
             break
+
+
+def _write_auto_state(ctx, args, epoch: int, batch_offset: int) -> None:
+    """Overwrite auto_epoch_state.pt (+ its config snapshot) and tell the supervisor.
+
+    ADR 0006 Addendum 1: the system-level recovery point, independent of the
+    user's save_state_every_* archives (no args gate at epoch ends). Written to
+    auto_state_dir() (the task's own archive, tasks/<id>/state/; CLI falls back
+    to state_dir()). Pause resumes from it, and so do crash restarts and the
+    manual resume of a failed task.
+
+    ``epoch`` / ``batch_offset``: at an epoch end the epoch has already been
+    advanced and the offset is 0; a mid-epoch refresh passes the running epoch
+    and batch_idx + 1, so resuming skips the batches already trained (#625).
+    """
+    auto_state_path = build_auto_epoch_state_path(ctx.auto_state_dir())
+    auto_config_path = build_auto_epoch_config_path(ctx.auto_state_dir())
+    monitor_data = None
+    if ctx.monitor_server:
+        try:
+            from train_monitor import get_state
+            monitor_data = get_state()
+        except Exception:
+            pass
+    # Write the config snapshot first -- small and low failure probability
+    write_config_snapshot(auto_config_path, args, ctx.sample_prompts)
+    with optimizer_eval_mode(ctx.optimizer):
+        save_training_state(
+            auto_state_path, ctx.injector, ctx.optimizer,
+            epoch, ctx.global_step, ctx.loss_history,
+            monitor_state=monitor_data, scheduler=ctx.scheduler,
+            timestep_sampler=ctx.timestep_sampler,
+            sra_aligner=ctx.sra_aligner,
+            scaler=ctx.scaler,
+            model_family=ctx.family.spec.family_id,
+            ema=ctx.ema,
+            epoch_batch_offset=batch_offset,
+        )
+    ctx.wandb_monitor.upload_state_auto(auto_state_path)
+    # Update ctx fields for handle_interrupt to use when emitting pause_state
+    ctx.last_auto_epoch_state_path = auto_state_path
+    ctx.last_auto_epoch_config_path = auto_config_path
+    if batch_offset:
+        ctx.emit(f"Refreshed the recovery point (step {ctx.global_step})")
+    # The supervisor's `_on_line` catches this event -> marks
+    # slot.last_auto_epoch_state_path -> the is_pausable upgrade condition is
+    # met -> SSE unlocks the UI pause button (ADR Addendum 1); it also
+    # persists the path as the task's resume point (Addendum 2).
+    emit_event("auto_epoch_backup_written", {
+        "state_path": str(auto_state_path),
+        "config_path": str(auto_config_path),
+        "epoch": epoch,
+        "step": ctx.global_step,
+    })

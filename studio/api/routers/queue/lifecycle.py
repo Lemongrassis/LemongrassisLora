@@ -444,6 +444,8 @@ def resume_task(task_id: int) -> dict[str, Any]:
             finished_at=None,
             exit_code=None,
             error_msg=None,
+            # a manual resume gives crash restarts a fresh allowance
+            auto_restart_streak=0,
         )
         if status in ("failed", "canceled"):
             # ADR Addendum 2 decision 3: move the resume point into paused_* to reuse the

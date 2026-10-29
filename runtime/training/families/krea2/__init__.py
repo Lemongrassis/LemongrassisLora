@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, Iterable
 
 import torch
 
 from ...block_swap import find_block_swap, move_module_excluding
 
-from .preset import KREA2_PRESET
+from .preset import KREA2_PRESET, preset_for_args
 from .sampling import (
     KREA2_BASE_IMAGE_SEQ_LEN,
     KREA2_BASE_SHIFT,
@@ -147,9 +148,14 @@ KREA2_SPEC = ModelSpec(
 class Krea2Family:
     spec = KREA2_SPEC
 
+    def load_options(self, args):
+        get = args.get if isinstance(args, dict) else lambda k, d: getattr(args, k, d)
+        return {"dit": {"int8_matmul": get("int8_train_matmul", "w8a8") or "w8a8"}}
+
     def load_dit(self, path, device, dtype, *,
                  attention_backend: str = "flash_attn", repo_root=None,
-                 purpose: str = "train", blocks_to_swap: int = 0):
+                 purpose: str = "train", blocks_to_swap: int = 0,
+                 int8_matmul: str = "w8a8"):
         from training.families.krea2.loader import load_krea2_model
 
         if attention_backend != "none":
@@ -159,7 +165,21 @@ class Krea2Family:
             )
         return load_krea2_model(
             path, device, dtype, purpose=purpose, blocks_to_swap=blocks_to_swap,
+            int8_matmul=int8_matmul,
         )
+
+    def preview_base(self, args, model):
+        """Previews on Turbo while training on Raw (``sample_base=turbo``), else None."""
+        if str(getattr(args, "sample_base", "train") or "train") != "turbo":
+            return None
+        path = str(getattr(args, "sample_turbo_path", "") or "").strip()
+        if not path:
+            raise ValueError("Previews are set to Turbo, but the Turbo file (sample_turbo_path) is empty")
+        from training.families.krea2.preview_base import Krea2PreviewBase
+
+        preview = Krea2PreviewBase(model, args.transformer_path, path)
+        logger.info("previews will run on %s (weights swapped in for each preview)", Path(path).name)
+        return preview
 
     def swappable_blocks(self, *, checkpoint_path: str | None = None) -> int:
         """Upper bound on the number of swappable layers (= DiT backbone layer count).
@@ -349,6 +369,10 @@ class Krea2Family:
 
     def lora_preset(self) -> dict[str, Any]:
         return KREA2_PRESET
+
+    def lora_preset_for_args(self, args) -> dict[str, Any]:
+        """Training: preset without the layer groups switched off in the config."""
+        return preset_for_args(KREA2_PRESET, args)
 
     def lora_metadata(self) -> dict[str, str]:
         return {

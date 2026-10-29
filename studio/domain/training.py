@@ -100,6 +100,11 @@ class TrainingConfig(BaseModel):
         "none", description="Qwen3.5 frozen weights: none, ConvRot INT8, or qfloat8 (scaled FP8 E4M3). Computation remains BF16. Choose BF16 weights for on-load quantization; pre-quantized ConvRot files are detected automatically.",
         json_schema_extra=_meta("model", show_when="model_family==moss_image"),
     )
+    int8_train_matmul: Literal["w8a8", "w8a16"] = Field(
+        "w8a8",
+        description="Krea2 INT8 ConvRot base (pre-quantized file) during training. w8a8: activations are also quantized to int8 per row for the fused int8 matmul — fastest, adds quantization noise in every layer. w8a16: the int8 weight is dequantized per layer and activations stay in bf16 — more accurate forward and gradients, same memory, slower compute (with block swap the transfer is usually the bottleneck anyway). Ignored for bf16 / fp8 bases",
+        json_schema_extra=_meta("model", show_when="model_family==krea2"),
+    )
     text_encoder_layers_to_offload: int = Field(
         0, ge=0, le=32, description="Text Encoder Layer Offloading: number of frozen Qwen3.5 layers kept in RAM and loaded only when needed (0=off, 32=all). Saves memory while caching captions; independent of Transformer Layer Offloading.",
         json_schema_extra=_meta("system", show_when="model_family==moss_image"),
@@ -480,6 +485,27 @@ class TrainingConfig(BaseModel):
         examples=[{"lora_unet_.*double.*": 16}],
         json_schema_extra=_meta("lora", "code", advanced=True, show_when="use_riemannian!=true"),
     )
+    # Krea2 layer groups left out of the adapter (all 264 Linear layers are trained by default)
+    krea2_exclude_io: bool = Field(
+        False,
+        description="Krea2: do not train the input and output layers (first / last.linear). They work directly on latents, so training them shifts color and contrast globally and is a common source of artifacts",
+        json_schema_extra=_meta("krea2_layers", show_when="model_family==krea2"),
+    )
+    krea2_exclude_time: bool = Field(
+        False,
+        description="Krea2: do not train the timestep embedding and the shared modulation (tmlp / tproj). tproj sets shift / scale / gate for all 28 blocks at once, so a LoRA there moves the whole model and overcooks faster",
+        json_schema_extra=_meta("krea2_layers", show_when="model_family==krea2"),
+    )
+    krea2_exclude_text: bool = Field(
+        False,
+        description="Krea2: do not train the text stack (txtfusion / txtmlp) that turns Qwen3-VL output into conditioning. The model then reads the prompt like the base: better prompt following and LoRA stacking, less memorizing of captions. Keep it trained for trigger-word character LoRAs if names do not stick",
+        json_schema_extra=_meta("krea2_layers", show_when="model_family==krea2"),
+    )
+    krea2_exclude_mlp: bool = Field(
+        False,
+        description="Krea2: do not train the MLP of the 28 DiT blocks, leaving attention only. MLPs hold objects, faces and textures, so the LoRA copies dataset content less and carries style more cleanly, but learns slower: raise the rank (e.g. 64) and the steps",
+        json_schema_extra=_meta("krea2_layers", show_when="model_family==krea2"),
+    )
 
     # ------------------------------------------------------------------ Training
     epochs: int = Field(
@@ -516,6 +542,20 @@ class TrainingConfig(BaseModel):
         description="Gradient checkpointing (saves VRAM, adds roughly 1/3 more compute)",
         json_schema_extra=_meta("training", disable_when="low_vram==true", disable_value=True,
                                 disable_hint="Low VRAM keeps gradient checkpointing on"),
+    )
+    grad_checkpoint_partial: bool = Field(
+        False,
+        description="Partial gradient checkpointing: the first blocks keep their activations (no recompute), the rest are checkpointed. "
+                    "Faster than full checkpointing, uses more VRAM; the trained weights are the same",
+        json_schema_extra=_meta("training", show_when="grad_checkpoint==true&&model_family==anima",
+                                disable_when="low_vram==true", disable_value=False,
+                                disable_hint="Low VRAM checkpoints every block"),
+    )
+    grad_checkpoint_skip_pct: int = Field(
+        25, ge=5, le=95,
+        description="[Partial checkpointing] Share of DiT blocks run without checkpointing, in percent (Anima 2B: 25% = 7 of 28 blocks). "
+                    "Higher = faster and more VRAM. Blocks offloaded to RAM by Transformer Layer Offloading always stay checkpointed",
+        json_schema_extra=_meta("training", show_when="grad_checkpoint==true&&grad_checkpoint_partial==true&&model_family==anima"),
     )
     grad_accum: int = Field(
         4, ge=1,
@@ -1029,7 +1069,8 @@ class TrainingConfig(BaseModel):
             "timestep_sampling",
             # style_friendly's shift is fully determined by style_snr_mean;
             # stacking both would double-shift
-            show_when="timestep_sampling!=uniform&&timestep_sampling!=style_friendly&&timestep_sampling!=dual_peak&&timestep_sampling!=moss_logit_normal",
+            # krea2_shift builds its own shift from each image's token count
+            show_when="timestep_sampling!=uniform&&timestep_sampling!=style_friendly&&timestep_sampling!=dual_peak&&timestep_sampling!=moss_logit_normal&&timestep_sampling!=krea2_shift",
             alt_description="When InfoNoise is on, acts as the warmup-phase baseline shift — the adaptive CDF takes over for the main phase; when Leap is enabled, the leap path always uses U(0,1), and this field only applies to the (1-leap_ratio) fraction of standard steps",
             alt_description_when="infonoise_enabled==true||leap_enabled==true",
             advanced=True,
@@ -1040,7 +1081,7 @@ class TrainingConfig(BaseModel):
         description="Fraction of samples routed to the biased end under mixed_* modes: 0 = fully uniform; typical range 0.15-0.30",
         json_schema_extra=_meta(
             "timestep_sampling",
-            show_when="timestep_sampling!=uniform&&timestep_sampling!=dual_peak&&timestep_sampling!=moss_logit_normal",
+            show_when="timestep_sampling!=uniform&&timestep_sampling!=dual_peak&&timestep_sampling!=moss_logit_normal&&timestep_sampling!=krea2_shift",
             alt_description="With InfoNoise on + a mixed_* baseline, this is the warmup-phase mix ratio — the adaptive CDF takes over for the main phase; when Leap is enabled, the leap path always uses U(0,1), and this field only applies to the (1-leap_ratio) fraction of standard steps",
             alt_description_when="infonoise_enabled==true||leap_enabled==true",
             advanced=True,
@@ -1051,6 +1092,7 @@ class TrainingConfig(BaseModel):
         description="Extra σ-schedule shift applied to t after sampling: 1.0 = no shift; higher values bias the whole distribution toward the high-noise end. Differs from timestep_shift by acting on the final t rather than inside logit-normal",
         json_schema_extra=_meta(
             "timestep_sampling",
+            show_when="timestep_sampling!=krea2_shift",
             alt_description="Only takes effect during InfoNoise's warmup period — the adaptive CDF takes over for the main phase; when Leap is enabled, the leap path always uses U(0,1), and this field only applies to the (1-leap_ratio) fraction of standard steps",
             alt_description_when="infonoise_enabled==true||leap_enabled==true",
             advanced=True,
@@ -1159,6 +1201,12 @@ class TrainingConfig(BaseModel):
             alt_description="When Leap is enabled, the leap path's t_k/t_j are not affected by this correction — it only applies to the (1-leap_ratio) fraction of standard steps",
             alt_description_when="leap_enabled==true",
             advanced=True,
+            # The trainer refuses this together with a sampler that shifts by resolution itself:
+            # hidden under krea2_shift, and a stale true is reset by the takeover
+            show_when="timestep_sampling!=krea2_shift",
+            disable_when="timestep_sampling==krea2_shift",
+            disable_value=False,
+            disable_hint="krea2_shift already shifts t by each image's token count",
         ),
     )
     infonoise_enabled: bool = Field(
@@ -1852,6 +1900,24 @@ class TrainingConfig(BaseModel):
         description="Save full training state every N steps (for resuming, 0=disabled)",
         json_schema_extra=_meta("output"),
     )
+    auto_state_every_minutes: int = Field(
+        30, ge=0,
+        description=(
+            "Refresh the automatic recovery point every N minutes mid-epoch "
+            "(one overwritten file; pause and crash restarts resume from it). "
+            "0 = only at the end of each epoch"
+        ),
+        json_schema_extra=_meta("output"),
+    )
+    crash_auto_restarts: int = Field(
+        1, ge=0, le=5,
+        description=(
+            "If training crashes, restart it automatically from the latest recovery "
+            "point, at most N times per start (0=off); after that the task stays "
+            "failed and Resume continues it from the same point"
+        ),
+        json_schema_extra=_meta("output"),
+    )
     seed: int = Field(
         42,
         description="Training random seed",
@@ -1879,15 +1945,42 @@ class TrainingConfig(BaseModel):
         description="Sample every N steps (0=disabled)",
         json_schema_extra=_meta("sample"),
     )
+    sample_base: Literal["train", "turbo"] = Field(
+        "train",
+        description="Model the previews are drawn on. train: the training base itself. "
+                    "turbo: Krea 2 Turbo with the LoRA being trained — before each preview the base "
+                    "weights are replaced from the Turbo file and read back from the training file "
+                    "after it (about 2× the file size read from disk per preview, no extra VRAM or RAM)",
+        json_schema_extra=_meta("sample", show_when="model_family==krea2"),
+    )
+    sample_turbo_path: str = Field(
+        "",
+        description="Turbo checkpoint for previews. It must store weights the same way as the "
+                    "training base: Turbo INT8 ConvRot for a Raw INT8 ConvRot base, Turbo fp8_scaled "
+                    "for a Raw fp8_scaled base, Turbo bf16 for a Raw bf16 base",
+        json_schema_extra=_meta("sample", "path",
+                                show_when="model_family==krea2&&sample_base==turbo"),
+    )
+    sample_turbo_steps: int = Field(
+        8, ge=1,
+        description="Inference steps on Turbo (distilled for 8)",
+        json_schema_extra=_meta("sample", show_when="model_family==krea2&&sample_base==turbo"),
+    )
+    sample_turbo_cfg: float = Field(
+        0.0, ge=0.0,
+        description="Guidance on Turbo. 0 = no CFG, the same as cfg 1 in ComfyUI; Turbo is "
+                    "distilled to work without it",
+        json_schema_extra=_meta("sample", show_when="model_family==krea2&&sample_base==turbo"),
+    )
     sample_infer_steps: int = Field(
         25, ge=1,
         description="Inference steps",
-        json_schema_extra=_meta("sample"),
+        json_schema_extra=_meta("sample", show_when="model_family!=krea2||sample_base!=turbo"),
     )
     sample_cfg_scale: float = Field(
         4.0, ge=0.0,
         description="CFG Scale",
-        json_schema_extra=_meta("sample"),
+        json_schema_extra=_meta("sample", show_when="model_family!=krea2||sample_base!=turbo"),
     )
     sample_sampler_name: Literal["er_sde", "dpmpp_3m_sde", "euler"] = Field(
         "er_sde",
