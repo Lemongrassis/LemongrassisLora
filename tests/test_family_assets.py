@@ -133,10 +133,10 @@ def test_krea2_catalog_sections_report_raw_turbo_and_text_encoder(tmp_path):
     assert any(f["name"] == "config.json" for f in fp8_te["files"])
     main = sections["krea2_main"]
     assert [v["variant"] for v in main["variants"]] == [
-        "raw", "raw_fp8", "turbo", "turbo_fp8",
+        "raw", "raw_fp8", "turbo", "turbo_fp8", "turbo_int8",
     ]
     assert [v["purpose"] for v in main["variants"]] == [
-        "training", "training", "inference", "inference",
+        "training", "training", "inference", "inference", "inference",
     ]
     assert main["selected"] == str(custom)
     assert main["custom"] == [{

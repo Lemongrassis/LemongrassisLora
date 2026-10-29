@@ -230,6 +230,9 @@ class ModelCache:
         self.ram_guard: bool = False
         # Trailing DiT blocks kept in pinned RAM (block swap); decided at load time
         self.blocks_to_swap: int = 0
+        #: Image size (pixels) the automatic swap count left room for; a larger
+        #: image may need a reload with more blocks in RAM (0 = explicit count)
+        self.swap_pixels: int = 0
         #: Identity key for the TE-first stack (family_id, text_encoder_path)
         #: -- ensure_text_ready reuses/rebuilds based on this; _load uses it
         #: to avoid a duplicate load
@@ -343,6 +346,7 @@ class ModelCache:
             or self.mixed_precision != precision
             or self.vae_precision != vae_precision
             or self.text_encoder_backend != text_encoder_backend
+            or self._needs_more_room(cfg)
             or self.t5_tokenizer_backend != t5_tokenizer_backend
         )
 
@@ -354,8 +358,21 @@ class ModelCache:
             # budgeting: the auto swap count reads free VRAM, which must not
             # still include the previous model.
             self.unload(keep_text=True)
+            # A canceled / failed run's traceback can still pin the previous
+            # model's tensors; sweep them before free VRAM is measured
+            _reclaim_cuda_leftovers()
+            if torch.cuda.is_available():
+                stale = torch.cuda.memory_allocated()
+                if stale > 512 * 1024**2:
+                    logger.warning(
+                        "%.2f GB of VRAM still held by this process after unloading the previous model; "
+                        "the block swap count leaves room for it", stale / 1024**3,
+                    )
             family = _T.get_family(family_id)
             blocks_to_swap = _resolve_blocks_to_swap(cfg, family, transformer_path)
+            if blocks_to_swap > 0:
+                logger.info("auto block swap: %d blocks in RAM for a %dx%d image",
+                            blocks_to_swap, int(cfg.get("width", 1024)), int(cfg.get("height", 1024)))
             ratio_fn = getattr(family, "swapped_param_ratio", None)
             check_load_budget(
                 self.ram_guard,
@@ -379,7 +396,31 @@ class ModelCache:
                 t5_tokenizer_backend=t5_tokenizer_backend,
                 blocks_to_swap=blocks_to_swap,
             )
+            self.swap_pixels = 0 if cfg.get("blocks_to_swap") is not None else _image_pixels(cfg)
             _emit_evt("loaded")
+
+    def _needs_more_room(self, cfg: dict[str, Any]) -> bool:
+        """A larger image than the automatic swap count was sized for, and the
+        free VRAM beside the loaded model can't cover the extra activations."""
+        if not self.loaded or not self.swap_pixels or cfg.get("blocks_to_swap") is not None:
+            return False
+        pixels = _image_pixels(cfg)
+        if pixels <= self.swap_pixels or not torch.cuda.is_available():
+            return False
+        from training import sysmem
+        from training.block_swap_preflight import inference_headroom_bytes
+
+        extra = inference_headroom_bytes(pixels) - inference_headroom_bytes(self.swap_pixels)
+        free = sysmem.gpu_free_bytes_global()
+        if free is not None:
+            # the allocator's cached blocks from the last image are reusable
+            free += torch.cuda.memory_reserved() - torch.cuda.memory_allocated()
+        if free is not None and free >= extra:
+            self.swap_pixels = pixels
+            return False
+        logger.info("larger image (%d px) than the block swap was sized for: reloading with more blocks in RAM",
+                    pixels)
+        return True
 
     def _load(
         self,
@@ -648,6 +689,7 @@ class ModelCache:
             # returned to the OS below (gc alone returns 0 bytes, doc §9.7)
             swap.close()
         self.blocks_to_swap = 0
+        self.swap_pixels = 0
         self.model = None
         self.vae = None
         self.family_id = None
@@ -680,10 +722,15 @@ class ModelCache:
             pass
 
 
+def _image_pixels(cfg: dict[str, Any]) -> int:
+    return int(cfg.get("width", 1024) or 1024) * int(cfg.get("height", 1024) or 1024)
+
+
 def _resolve_blocks_to_swap(cfg: dict[str, Any], family: Any, transformer_path: str) -> int:
     """Swap count for the next DiT load: an explicit ``blocks_to_swap`` >= 0
-    in cfg wins; otherwise the smallest count that fits the free VRAM (0 when
-    the model fits whole, e.g. on 24GB cards)."""
+    in cfg wins; otherwise the smallest count that fits the free VRAM with
+    room for sampling the requested image size (0 when the model fits whole,
+    e.g. on 24GB cards)."""
     explicit = cfg.get("blocks_to_swap")
     if explicit is not None and int(explicit) >= 0:
         return int(explicit)
@@ -691,7 +738,7 @@ def _resolve_blocks_to_swap(cfg: dict[str, Any], family: Any, transformer_path: 
         return 0
     from training.block_swap_preflight import inference_blocks_to_swap
 
-    return inference_blocks_to_swap(family, transformer_path)
+    return inference_blocks_to_swap(family, transformer_path, _image_pixels(cfg))
 
 
 def _reclaim_cuda_leftovers() -> None:

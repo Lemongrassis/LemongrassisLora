@@ -58,7 +58,9 @@ FAMILY_CONFIG_DEFAULTS: dict[str, dict[str, Any]] = {
         "sample_sampler_name": "euler",
         "sample_scheduler": "simple",
         "sample_infer_steps": 28,
-        "sample_cfg_scale": 4.5,
+        # ComfyUI cfg (Krea's own guidance 4.5 = cfg 5.5)
+        "sample_cfg_scale": 5.5,
+        "sample_cfg_comfy": True,
     },
 }
 

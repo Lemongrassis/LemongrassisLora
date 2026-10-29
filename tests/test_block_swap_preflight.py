@@ -346,3 +346,32 @@ def test_inference_pick_unknown_vram_keeps_old_behavior():
 
 def test_inference_pick_hopeless_swaps_everything():
     assert _pick(_BF16_BYTES, 2 * _GIB) == _TOTAL_BLOCKS
+
+
+def test_inference_headroom_grows_with_image_size():
+    assert preflight.inference_headroom_bytes(None) == preflight._INFERENCE_HEADROOM_BYTES
+    small = preflight.inference_headroom_bytes(512 * 512)
+    square = preflight.inference_headroom_bytes(1024 * 1024)
+    tall = preflight.inference_headroom_bytes(1024 * 1536)
+    assert small == preflight._INFERENCE_HEADROOM_BYTES  # never below the fixed floor
+    assert small <= square < tall
+    # 1024x1536 on Krea2 INT8 OOMed with 3GB beside the weights
+    assert tall >= int(4.5 * _GIB)
+
+
+def test_inference_pick_uses_exact_resident_bytes():
+    # resident bytes from the file header win over the parameter-ratio estimate
+    block = int(0.405 * _GIB)
+    other = int(1.236 * _GIB)
+
+    def resident(blocks: int) -> int:
+        return other + block * (_TOTAL_BLOCKS - blocks) + (2 * block if blocks else 0)
+
+    free = int(11.0 * _GIB)
+    headroom = preflight.inference_headroom_bytes(1024 * 1536)
+    blocks = preflight.pick_inference_blocks(
+        file_bytes=int(12.57 * _GIB), total_blocks=_TOTAL_BLOCKS, ratio_fn=_ratio,
+        free_vram_bytes=free, headroom_bytes=headroom, resident_fn=resident,
+    )
+    assert resident(blocks) + headroom <= free
+    assert resident(blocks - 1) + headroom > free

@@ -158,7 +158,7 @@ def _draw_sample(
     on_preview_base = getattr(ctx, "preview_base", None) is not None
     if on_preview_base:
         s_steps = int(getattr(args, "sample_turbo_steps", 8) or 8)
-        s_cfg = float(getattr(args, "sample_turbo_cfg", 0.0) or 0.0)
+        s_cfg = float(getattr(args, "sample_turbo_cfg", 1.0) or 1.0)
 
     # T-LoRA: matches ControlGenAI/T-LoRA's official inference -- the sample
     # stage should not apply the timestep mask. The official inferencer

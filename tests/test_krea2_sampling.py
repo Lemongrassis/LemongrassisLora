@@ -151,7 +151,7 @@ def test_euler_uses_krea_guidance_and_reports_denoised_preview():
         height=16,
         width=16,
         steps=1,
-        cfg_scale=4.5,
+        cfg_scale=5.5,  # ComfyUI cfg = Krea guidance 4.5
         device="cpu",
         dtype=torch.float32,
         latents=initial,
@@ -257,3 +257,18 @@ def test_sampling_runs_through_real_tiny_krea2_forward():
 
     assert output.shape == (1, 2, 1, 2, 2)
     assert torch.isfinite(output).all()
+
+
+def test_cfg_is_comfyui_scale():
+    # the number users type is ComfyUI's cfg: 1 = no CFG, Krea guidance = cfg - 1
+    def guidance(cfg):
+        return resolve_sampling_settings(
+            distilled=False, steps=None, cfg_scale=cfg, sampler_name=None, scheduler=None,
+        )[1]
+
+    assert guidance(1.0) == 0.0
+    assert guidance(0.0) == 0.0
+    assert guidance(5.5) == KREA2_RAW_GUIDANCE
+    assert guidance(2.0) == 1.0
+    with pytest.raises(ValueError):
+        guidance(-1.0)

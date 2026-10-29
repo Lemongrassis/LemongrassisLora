@@ -1642,6 +1642,13 @@ class TrainingConfig(BaseModel):
             return data
         payload = dict(data)
         family = str(payload.get("model_family") or "anima")
+        if family == "krea2" and not payload.get("sample_cfg_comfy"):
+            # Saved before Krea2 took ComfyUI's cfg: the values were Krea's
+            # guidance (cfg - 1). Done before the defaults so only saved values move.
+            for key in ("sample_cfg_scale", "sample_turbo_cfg"):
+                if payload.get(key) is not None:
+                    payload[key] = float(payload[key]) + 1.0
+            payload["sample_cfg_comfy"] = True
         for field, value in FAMILY_CONFIG_DEFAULTS.get(family, {}).items():
             payload.setdefault(field, value)
         return payload
@@ -1967,9 +1974,8 @@ class TrainingConfig(BaseModel):
         json_schema_extra=_meta("sample", show_when="model_family==krea2&&sample_base==turbo"),
     )
     sample_turbo_cfg: float = Field(
-        0.0, ge=0.0,
-        description="Guidance on Turbo. 0 = no CFG, the same as cfg 1 in ComfyUI; Turbo is "
-                    "distilled to work without it",
+        1.0, ge=0.0,
+        description="CFG on Turbo, as in ComfyUI. 1 = no CFG: Turbo is distilled to work without it",
         json_schema_extra=_meta("sample", show_when="model_family==krea2&&sample_base==turbo"),
     )
     sample_infer_steps: int = Field(
@@ -1979,8 +1985,14 @@ class TrainingConfig(BaseModel):
     )
     sample_cfg_scale: float = Field(
         4.0, ge=0.0,
-        description="CFG Scale",
+        description="CFG Scale (Krea 2: as in ComfyUI, 1 = no CFG)",
         json_schema_extra=_meta("sample", show_when="model_family!=krea2||sample_base!=turbo"),
+    )
+    sample_cfg_comfy: bool = Field(
+        False,
+        description="Krea 2 sample CFG values are on ComfyUI's scale (configs saved earlier "
+                    "held Krea's guidance = cfg - 1 and are moved up by 1 when loaded)",
+        json_schema_extra=_meta("sample", hidden=True),
     )
     sample_sampler_name: Literal["er_sde", "dpmpp_3m_sde", "euler"] = Field(
         "er_sde",

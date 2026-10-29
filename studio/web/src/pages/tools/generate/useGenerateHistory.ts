@@ -12,7 +12,7 @@ import {
   type HistoryEntry,
   type HistoryXYMeta,
 } from './entryAdapter'
-import type { GenerateParamsSnapshot } from './paramsSnapshot'
+import { isLegacyKrea2Cfg, upgradeCfgValue, upgradeSnapshot, type GenerateParamsSnapshot } from './paramsSnapshot'
 
 export type { CacheEntry, DiskEntry, HistoryEntry, HistoryXYMeta } from './entryAdapter'
 
@@ -47,15 +47,22 @@ interface DiskHistoryResponse {
   entries: DiskHistoryServerEntry[]
 }
 
-function xyMetaFromServer(meta: DiskHistoryServerXYMeta): HistoryXYMeta {
+/** ``legacyCfg``: an old Krea 2 grid, whose cfg axis values move to ComfyUI's scale. */
+function xyMetaFromServer(meta: DiskHistoryServerXYMeta, legacyCfg = false): HistoryXYMeta {
+  const shiftX = legacyCfg && meta.x_axis === 'cfg_scale'
+  const shiftY = legacyCfg && meta.y_axis === 'cfg_scale'
   return {
     xAxis: meta.x_axis ?? '',
     yAxis: meta.y_axis,
-    xValues: meta.x_values,
-    yValues: meta.y_values,
+    xValues: shiftX ? meta.x_values.map(upgradeCfgValue) : meta.x_values,
+    yValues: shiftY ? meta.y_values.map(upgradeCfgValue) : meta.y_values,
     samples: meta.samples.map((s) => ({
       path: s.path,
-      xy: { xi: s.xy.xi, yi: s.xy.yi, xv: s.xy.xv ?? '', yv: s.xy.yv },
+      xy: {
+        xi: s.xy.xi, yi: s.xy.yi,
+        xv: shiftX ? upgradeCfgValue(s.xy.xv ?? '') : s.xy.xv ?? '',
+        yv: shiftY ? upgradeCfgValue(s.xy.yv) : s.xy.yv,
+      },
       imageUrl: s.image_url,
     })),
   }
@@ -72,15 +79,17 @@ function diskEntryFromServer(d: DiskHistoryServerEntry): DiskEntry {
     imageUrl: d.image_url,
     thumbUrl: d.thumb_url,
     createdAt: d.created_at * 1000,
-    params: d.params as GenerateParamsSnapshot,
-    xyMeta: d.xy_meta ? xyMetaFromServer(d.xy_meta) : undefined,
+    params: upgradeSnapshot(d.params as GenerateParamsSnapshot),
+    xyMeta: d.xy_meta
+      ? xyMetaFromServer(d.xy_meta, isLegacyKrea2Cfg(d.params as GenerateParamsSnapshot))
+      : undefined,
   }
 }
 
 /** server cache index -> frontend CacheEntry. XY mode rebuilds xyMeta from server samples;
  *  axis metadata comes from params.xy_draft (same scheme as entryBadge). */
 function cacheEntryFromServer(c: CacheGenerateHistoryEntry): CacheEntry {
-  const params = c.params as unknown as GenerateParamsSnapshot
+  const params = upgradeSnapshot(c.params as unknown as GenerateParamsSnapshot)
   let xyMeta: HistoryXYMeta | undefined
   if (c.mode === 'xy' && c.samples && c.samples.length > 0) {
     const xDraft = params.xy_draft?.x

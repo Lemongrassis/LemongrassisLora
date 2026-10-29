@@ -306,10 +306,24 @@ def run(ctx) -> None:
 
 
 #: VRAM kept free next to the resident weights when the generate daemon picks a
-#: swap count: sampling activations at large resolutions, VAE decode, LoRA merge
-#: temporaries, allocator slack. Smaller than the training headroom: no
-#: gradients, no optimizer state.
+#: swap count: sampling activations, VAE decode, LoRA merge temporaries,
+#: allocator slack. Smaller than the training headroom: no gradients, no
+#: optimizer state. Used as is when the image size isn't known.
 _INFERENCE_HEADROOM_BYTES = 3 * _GIB
+#: Size-aware headroom: a fixed part plus activations per image token (16x16
+#: pixels). Calibrated on Krea2 INT8 at 1024x1536 on a 12GB card, where 3GB
+#: OOMed and ~3.4GB was the measured need: 1.5GB + 6144 tokens x 0.5MB = 4.5GB.
+_INFERENCE_HEADROOM_BASE = int(1.5 * _GIB)
+_INFERENCE_BYTES_PER_TOKEN = 512 * 1024
+
+
+def inference_headroom_bytes(image_pixels: Optional[int] = None) -> int:
+    """VRAM to keep free beside the DiT weights for one image of ``image_pixels``."""
+    if not image_pixels or image_pixels <= 0:
+        return _INFERENCE_HEADROOM_BYTES
+    tokens = int(image_pixels) // 256
+    return max(_INFERENCE_HEADROOM_BYTES,
+               _INFERENCE_HEADROOM_BASE + tokens * _INFERENCE_BYTES_PER_TOKEN)
 
 
 def pick_inference_blocks(
@@ -319,9 +333,14 @@ def pick_inference_blocks(
     ratio_fn: Callable[[int], float],
     free_vram_bytes: Optional[int],
     headroom_bytes: int = _INFERENCE_HEADROOM_BYTES,
+    resident_fn: Optional[Callable[[int], int]] = None,
 ) -> int:
     """Pure arithmetic: the smallest swap count whose resident weights + the two
     GPU slots + ``headroom_bytes`` fit in ``free_vram_bytes``.
+
+    ``resident_fn(blocks)`` gives the exact resident bytes (slots included)
+    when the family can read them from the file; otherwise they're estimated
+    as the parameter ratio of the file size.
 
     0 when the whole model fits (or nothing is known); ``total_blocks`` when
     even swapping everything is short (best effort, the OOM message then is
@@ -329,21 +348,24 @@ def pick_inference_blocks(
     """
     if file_bytes <= 0 or total_blocks <= 0 or free_vram_bytes is None:
         return 0
-    # A homogeneous DiT: one block is ratio(1) of the file; the swap keeps two
-    # GPU slots of that size (double buffering)
-    slot_bytes = 2 * int(file_bytes * min(max(float(ratio_fn(1)), 0.0), 1.0))
+    if resident_fn is None:
+        # A homogeneous DiT: one block is ratio(1) of the file; the swap keeps
+        # two GPU slots of that size (double buffering)
+        slot_bytes = 2 * int(file_bytes * min(max(float(ratio_fn(1)), 0.0), 1.0))
+
+        def resident_fn(blocks: int) -> int:
+            ratio = min(max(float(ratio_fn(blocks)), 0.0), 1.0)
+            return int(file_bytes * (1.0 - ratio)) + (slot_bytes if blocks > 0 else 0)
     for blocks in range(total_blocks + 1):
-        ratio = min(max(float(ratio_fn(blocks)), 0.0), 1.0)
-        need = int(file_bytes * (1.0 - ratio)) + headroom_bytes
-        if blocks > 0:
-            need += slot_bytes
-        if free_vram_bytes >= need:
+        if free_vram_bytes >= resident_fn(blocks) + headroom_bytes:
             return blocks
     return total_blocks
 
 
-def inference_blocks_to_swap(family, transformer_path: str) -> int:
-    """Generate-side auto swap count for ``family`` (0 = load the DiT whole).
+def inference_blocks_to_swap(family, transformer_path: str,
+                             image_pixels: Optional[int] = None) -> int:
+    """Generate-side auto swap count for ``family`` (0 = load the DiT whole),
+    with room for sampling an image of ``image_pixels``.
 
     Same skip rules as ``run``: no block_swap capability, missing estimators,
     or a failed query -> 0 (the old full-load behavior).
@@ -356,12 +378,19 @@ def inference_blocks_to_swap(family, transformer_path: str) -> int:
         return 0
     from training import sysmem
 
+    # exact resident bytes when the family reads them from the file header
+    resident = getattr(family, "inference_resident_bytes", None)
     try:
         return pick_inference_blocks(
             file_bytes=sysmem._file_bytes([transformer_path]),
             total_blocks=int(blocks_fn(checkpoint_path=transformer_path)),
             ratio_fn=lambda n: float(ratio_fn(n, checkpoint_path=transformer_path)),
             free_vram_bytes=sysmem.gpu_free_bytes_global(),
+            headroom_bytes=inference_headroom_bytes(image_pixels),
+            resident_fn=(
+                (lambda n: int(resident(n, checkpoint_path=transformer_path)))
+                if resident is not None else None
+            ),
         )
     except Exception:  # noqa: BLE001
         logger.warning("inference block swap estimate failed, loading the DiT whole", exc_info=True)

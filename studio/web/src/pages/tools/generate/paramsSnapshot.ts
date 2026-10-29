@@ -11,7 +11,47 @@ import {
 } from './types'
 import type { XYAxisDraft } from './xy'
 
-export const PARAMS_SNAPSHOT_VERSION = 1
+/** 2: Krea 2 cfg is ComfyUI's (1 = no CFG). Version-1 Krea 2 snapshots held Krea's
+ *  guidance (cfg - 1) and are moved up by 1 when read, see upgradeSnapshot. */
+export const PARAMS_SNAPSHOT_VERSION = 2
+
+/** Shift the numbers of a cfg axis string ("3, 4.5") by +1, other text kept. */
+export function shiftCfgRaw(raw: string): string {
+  return raw.split(',').map((s) => {
+    const v = Number(s.trim())
+    return s.trim() === '' || !Number.isFinite(v) ? s : String(Number((v + 1).toFixed(6)))
+  }).join(', ')
+}
+
+/** Is this an old Krea 2 snapshot whose cfg values are Krea's guidance (cfg - 1)? */
+export function isLegacyKrea2Cfg(snap: { schema_version?: number; model_family?: string } | null | undefined): boolean {
+  return !!snap && snap.model_family === 'krea2' && (snap.schema_version ?? 1) < 2
+}
+
+/** Shift a value from an old Krea 2 snapshot's cfg axis to ComfyUI's scale. */
+export function upgradeCfgValue<T extends string | number | null>(value: T): T {
+  if (value === null || value === '') return value
+  const v = Number(value)
+  if (!Number.isFinite(v)) return value
+  const next = Number((v + 1).toFixed(6))
+  return (typeof value === 'number' ? next : String(next)) as T
+}
+
+/** Read an old Krea 2 snapshot on today's ComfyUI cfg scale (+1 to cfg and to a
+ *  cfg axis). Anything else is returned as is. */
+export function upgradeSnapshot<S extends GenerateParamsSnapshot>(snap: S): S {
+  if (!isLegacyKrea2Cfg(snap)) return snap
+  const axis = (a: SnapshotXYAxis | null | undefined) =>
+    a && a.axis === 'cfg_scale' ? { ...a, raw: shiftCfgRaw(a.raw) } : a ?? null
+  return {
+    ...snap,
+    schema_version: 2,
+    cfg_scale: upgradeCfgValue(snap.cfg_scale),
+    xy_draft: snap.xy_draft
+      ? { x: axis(snap.xy_draft.x) as SnapshotXYAxis, y: axis(snap.xy_draft.y) }
+      : snap.xy_draft,
+  }
+}
 
 export interface SnapshotLora {
   name: string
@@ -165,6 +205,7 @@ export async function applySnapshot(
   resolveLora: SnapshotLoraResolver,
   projectExists: (projectId: number) => boolean,
 ): Promise<AppliedSnapshot> {
+  snap = upgradeSnapshot(snap)
   const resolved = await Promise.all(snap.loras.map((l) => resolveLora(l)))
   const unresolved = resolved.filter((l) => !l.path).length
   const mode: 'single' | 'xy' = snap.mode === 'single' ? 'single' : 'xy'

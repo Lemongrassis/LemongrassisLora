@@ -16,7 +16,7 @@ from .sampling import (
     KREA2_BASE_SHIFT,
     KREA2_MAX_IMAGE_SEQ_LEN,
     KREA2_MAX_SHIFT,
-    KREA2_RAW_GUIDANCE,
+    KREA2_RAW_CFG,
     KREA2_RAW_STEPS,
     KREA2_SAMPLER,
     KREA2_SCHEDULER,
@@ -130,7 +130,7 @@ KREA2_SPEC = ModelSpec(
         default_sampler=KREA2_SAMPLER,
         default_scheduler=KREA2_SCHEDULER,
         default_steps=KREA2_RAW_STEPS,
-        default_cfg=KREA2_RAW_GUIDANCE,
+        default_cfg=KREA2_RAW_CFG,
         # Comfy-parity convention: fixed mu=1.15 (matches ComfyUI's
         # ModelSamplingFlux; note this value is **mu (pre-exp)**, unlike
         # Anima's ConstantShift, which is a direct factor -- shift_policy's
@@ -217,6 +217,14 @@ class Krea2Family:
 
         return swapped_param_ratio(blocks_to_swap)
 
+    def inference_resident_bytes(self, blocks_to_swap: int, *, checkpoint_path: str) -> int:
+        """Exact VRAM of the DiT weights at this swap count (from the file header),
+        for the generate-side swap pick: int8 blocks and bf16 non-block tensors
+        make a parameter ratio of the file size undercount it."""
+        from training.families.krea2.loader import resident_bytes
+
+        return resident_bytes(checkpoint_path, blocks_to_swap)
+
     def load_vae(self, path, device, dtype, *, tiling: str = "auto"):
         from training.vae import load_vae
 
@@ -287,8 +295,9 @@ class Krea2Family:
                      phase_callback=None, seed: int | None = None,
                      vram_policy: str | None = None):
         # First resolve steps and guidance by Raw/Turbo (when steps/cfg aren't
-        # given explicitly, use the family defaults: Raw 28 steps / 4.5, Turbo
-        # 8 steps / 0.0 -- TDM distillation has no uncond, so at guidance=0
+        # given explicitly, use the family defaults: Raw 28 steps / cfg 5.5,
+        # Turbo 8 steps / cfg 1; cfg is ComfyUI's, guidance = cfg - 1) -- TDM
+        # distillation has no uncond, so at guidance=0
         # prepare skips encoding the negative and sampling skips the uncond
         # forward pass).
         resolved_steps, guidance = resolve_sampling_settings(
@@ -356,7 +365,8 @@ class Krea2Family:
             height=height,
             width=width,
             steps=resolved_steps,
-            cfg_scale=guidance,
+            # the ComfyUI cfg again: sample_latents resolves it to the same guidance
+            cfg_scale=cfg_scale,
             sampler_name=sampler_name,
             scheduler=scheduler,
             distilled=distilled,

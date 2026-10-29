@@ -43,6 +43,11 @@ KREA2_RAW_STEPS = 28
 KREA2_RAW_GUIDANCE = 4.5
 KREA2_TURBO_STEPS = 8
 KREA2_TURBO_GUIDANCE = 0.0
+# What users set is a ComfyUI cfg (``uncond + cfg * (cond - uncond)``), the same
+# number that works in ComfyUI: cfg 1 = no CFG. Krea's own guidance g is
+# ``cond + g * (cond - uncond)``, i.e. g = cfg - 1 (Raw's 4.5 = cfg 5.5).
+KREA2_RAW_CFG = KREA2_RAW_GUIDANCE + 1.0
+KREA2_TURBO_CFG = KREA2_TURBO_GUIDANCE + 1.0
 # Fixed mu for inference sigmas (Comfy parity: ModelSamplingFlux shift=1.15, same for Raw/Turbo).
 # Formerly named KREA2_DISTILLED_MU -- after unifying the convention it's no longer distillation-only.
 KREA2_FIXED_MU = 1.15
@@ -68,6 +73,15 @@ def _validate_guidance(value: float) -> float:
     return guidance
 
 
+def guidance_from_cfg(cfg_scale: float) -> float:
+    """ComfyUI cfg -> Krea guidance (g = cfg - 1). cfg <= 1 runs without CFG:
+    below 1 ComfyUI would lean toward the negative, which nobody uses."""
+    cfg = float(cfg_scale)
+    if not math.isfinite(cfg) or cfg < 0:
+        raise ValueError("Krea2 cfg scale must be a finite non-negative number")
+    return max(cfg - 1.0, 0.0)
+
+
 def resolve_sampling_settings(
     *,
     distilled: bool,
@@ -76,7 +90,11 @@ def resolve_sampling_settings(
     sampler_name: str | None,
     scheduler: str | None,
 ) -> tuple[int, float]:
-    """Resolve Raw/Turbo defaults and reject sampler names from another family."""
+    """Resolve Raw/Turbo defaults and reject sampler names from another family.
+
+    ``cfg_scale`` is a ComfyUI cfg (1 = no CFG); the returned guidance is
+    Krea's ``g = cfg - 1`` used by the sampling loop.
+    """
 
     sampler = KREA2_SAMPLER if sampler_name is None else str(sampler_name).lower().strip()
     schedule = KREA2_SCHEDULER if scheduler is None else str(scheduler).lower().strip()
@@ -87,13 +105,11 @@ def resolve_sampling_settings(
         )
 
     default_steps = KREA2_TURBO_STEPS if distilled else KREA2_RAW_STEPS
-    default_guidance = KREA2_TURBO_GUIDANCE if distilled else KREA2_RAW_GUIDANCE
+    default_cfg = KREA2_TURBO_CFG if distilled else KREA2_RAW_CFG
     resolved_steps = default_steps if steps is None else int(steps)
     if resolved_steps <= 0:
         raise ValueError("Krea2 sampling steps must be positive")
-    guidance = _validate_guidance(
-        default_guidance if cfg_scale is None else cfg_scale,
-    )
+    guidance = guidance_from_cfg(default_cfg if cfg_scale is None else cfg_scale)
     return resolved_steps, guidance
 
 

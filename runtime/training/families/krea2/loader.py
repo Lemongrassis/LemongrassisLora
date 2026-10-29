@@ -403,6 +403,43 @@ def _swapped_param_counts(
     return swapped, total
 
 
+@lru_cache(maxsize=8)
+def _loaded_layout(path: str, mtime_ns: int, config: Krea2Config) -> tuple[int, tuple[int, ...]]:
+    """(bytes outside the blocks, bytes of each block) as the loader keeps them
+    in memory, from the header only: int8 / fp8 stay at 1 byte, float tensors
+    become bf16, scales are F32, comfy_quant specs are dropped."""
+    del mtime_ns  # cache key only
+    info, n2s, s2s = _inspect(path, config, allow_fp8=True)
+    blocks = [0] * config.layers
+    other = 0
+    with safe_open(str(info.path), framework="pt", device="cpu") as handle:
+        sources = [(name, key, False) for name, key in n2s.items()]
+        sources += [(f"{layer}.weight_scale", key, True) for layer, key in s2s.items()]
+        for name, key, is_scale in sources:
+            tensor = handle.get_slice(key)
+            numel = math_product(tuple(tensor.get_shape()))
+            dtype = tensor.get_dtype()
+            size = numel * (4 if is_scale else 1 if dtype == _INT8_DTYPE or dtype in _FP8_DTYPES else 2)
+            if name.startswith("blocks."):
+                blocks[int(name.split(".", 2)[1])] += size
+            else:
+                other += size
+    return other, tuple(blocks)
+
+
+def resident_bytes(
+    path: str | Path, blocks_to_swap: int, *, config: Krea2Config = KREA2_CONFIG,
+) -> int:
+    """VRAM the loaded DiT's weights take with ``blocks_to_swap`` trailing blocks
+    in RAM, including the two GPU slots block swap streams them through."""
+    checkpoint = _checkpoint_path(path)
+    other, blocks = _loaded_layout(str(checkpoint), checkpoint.stat().st_mtime_ns, config)
+    swapped = min(max(int(blocks_to_swap), 0), len(blocks))
+    kept = blocks[: len(blocks) - swapped]
+    slots = 2 * max(blocks[len(blocks) - swapped:]) if swapped else 0
+    return other + sum(kept) + slots
+
+
 def swapped_param_ratio(
     blocks_to_swap: int, *, config: Krea2Config = KREA2_CONFIG,
 ) -> float:
