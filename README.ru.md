@@ -238,8 +238,8 @@ Block swap, fp8, кеши латентов и текстового энкоде�
 ### 2 · Запуск
 
 ```bash
-git clone https://github.com/DualChimerra/AnimaTrainHub
-cd AnimaTrainHub
+git clone https://github.com/Lemongrassis/LemongrassisLora
+cd LemongrassisLora
 ```
 
 **Windows**: `LemongrassisLora.exe` или `studio.bat`<br>
@@ -393,7 +393,7 @@ python tools/download_models.py --endpoint URL   # через своё зерк�
 <summary><b>Структура репозитория</b></summary>
 
 ```
-AnimaTrainHub/
+LemongrassisLora/
 ├── runtime/        # ядро тренировки, генерация, демон инференса (работает и из CLI)
 ├── studio/         # веб-студия: FastAPI (api / services / domain / infrastructure / workers)
 │   └── web/        # интерфейс: React + Vite + Tailwind

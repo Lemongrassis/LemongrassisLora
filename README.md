@@ -238,8 +238,8 @@ Runtime mode chosen on first launch: binding, browser and data location follow i
 ### 2 · Launch
 
 ```bash
-git clone https://github.com/DualChimerra/AnimaTrainHub
-cd AnimaTrainHub
+git clone https://github.com/Lemongrassis/LemongrassisLora
+cd LemongrassisLora
 ```
 
 **Windows**: `LemongrassisLora.exe` or `studio.bat`<br>
@@ -393,7 +393,7 @@ Captions and tags, regularization, optimizers, training parameters, custom model
 <summary><b>Repository layout</b></summary>
 
 ```
-AnimaTrainHub/
+LemongrassisLora/
 ├── runtime/        # training core, generation, inference daemon (usable from the CLI)
 ├── studio/         # web studio: FastAPI (api / services / domain / infrastructure / workers)
 │   └── web/        # UI: React + Vite + Tailwind
