@@ -261,7 +261,7 @@ def init_wandb_monitor(args, output_dir: Path, config_path: Optional[Path]) -> W
 
     # api_key / base_url are placed directly into WANDB_API_KEY / WANDB_BASE_URL
     # by the supervisor; wandb.init() picks them up on its own, no handling needed here.
-    project = os.environ.get("WANDB_PROJECT") or "AnimaLoraStudio"
+    project = os.environ.get("WANDB_PROJECT") or "LemongrassisLora"
     entity = os.environ.get("WANDB_ENTITY") or None
     run_name = os.environ.get("WANDB_RUN_NAME") or str(args.output_name)
 

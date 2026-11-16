@@ -944,7 +944,7 @@ def _apply_runtime_mode_defaults(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="studio", description="AnimaTrainHub launcher")
+    p = argparse.ArgumentParser(prog="studio", description="LemongrassisLora launcher")
     sub = p.add_subparsers(dest="cmd")
 
     p_run = sub.add_parser("run", help="Build the frontend (if missing) + start the backend")

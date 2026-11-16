@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AnimaStudio Linux/macOS shortcut -- forwards to: python -m studio
+# LemongrassisLora Linux/macOS shortcut -- forwards to: python -m studio
 # Usage:
 #   ./studio.sh [--mirror] [--reinstall] [subcommand]
 #

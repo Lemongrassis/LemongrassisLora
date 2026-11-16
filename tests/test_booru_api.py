@@ -3,7 +3,7 @@
 Hotfix background: after danbooru put up Cloudflare, a missing User-Agent
 (requests' default `python-requests/X.Y.Z`) gets a 403 challenge page straight
 from CF. This pins down the two key invariants:
-- requests must carry a recognizable UA (containing 'AnimaLoraStudio')
+- requests must carry a recognizable UA (containing 'LemongrassisLora')
 - Accept: application/json makes middleware routing more deterministic
 
 No real HTTP is sent: a fake session intercepts and verifies sess.get's arguments.
@@ -31,17 +31,17 @@ def test_search_posts_sends_app_user_agent_for_danbooru() -> None:
     _, kwargs = sess.get.call_args
     headers = kwargs.get("headers") or {}
     assert "User-Agent" in headers
-    assert "AnimaLoraStudio" in headers["User-Agent"]
+    assert "LemongrassisLora" in headers["User-Agent"]
     assert headers.get("Accept") == "application/json"
 
 
 def test_search_posts_ua_includes_username_when_provided() -> None:
-    """When searching with a username, the UA should be 'AnimaLoraStudio/X (by username)' --
+    """When searching with a username, the UA should be 'LemongrassisLora/X (by username)' --
     the format danbooru's TOS recommends, so CF can allowlist by account instead of blocking anonymously."""
     sess = _fake_session([])
     booru_api.search_posts("danbooru", "1girl", username="alice", session=sess)
     ua = sess.get.call_args.kwargs["headers"]["User-Agent"]
-    assert "AnimaLoraStudio" in ua
+    assert "LemongrassisLora" in ua
     assert "(by alice)" in ua
 
 
@@ -51,7 +51,7 @@ def test_search_posts_ua_falls_back_when_no_username() -> None:
     booru_api.search_posts("danbooru", "1girl", session=sess)
     ua = sess.get.call_args.kwargs["headers"]["User-Agent"]
     assert "(by" not in ua
-    assert "AnimaLoraStudio/" in ua
+    assert "LemongrassisLora/" in ua
 
 
 def test_search_posts_sends_app_user_agent_for_gelbooru() -> None:
@@ -60,7 +60,7 @@ def test_search_posts_sends_app_user_agent_for_gelbooru() -> None:
     booru_api.search_posts("gelbooru", "1girl", session=sess)
     _, kwargs = sess.get.call_args
     headers = kwargs.get("headers") or {}
-    assert "AnimaLoraStudio" in headers["User-Agent"]
+    assert "LemongrassisLora" in headers["User-Agent"]
 
 
 def test_build_user_agent_strips_whitespace() -> None:
@@ -73,7 +73,7 @@ def test_build_user_agent_strips_whitespace() -> None:
 def test_search_posts_user_agent_does_not_impersonate_browser() -> None:
     """Regression: a Chrome browser UA was once used but Cloudflare flagged it as
     "a browser that doesn't run JS" and returned 403. The UA must clearly identify
-    itself as AnimaLoraStudio."""
+    itself as LemongrassisLora."""
     sess = _fake_session([])
     booru_api.search_posts("danbooru", "x", session=sess)
     ua = sess.get.call_args.kwargs["headers"]["User-Agent"]

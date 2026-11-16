@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Local one-click launcher -- source for `AnimaLoraStudio.exe` (added in this fork).
+"""Local one-click launcher -- source for `LemongrassisLora.exe` (added in this fork).
 
 Aimed at local users who "downloaded the repo and just want to double-click and go":
 on Windows, `studio.bat` requires already knowing how to open a terminal, that PowerShell
@@ -41,7 +41,7 @@ import venv
 from pathlib import Path
 from typing import Any, NoReturn, Optional, Sequence
 
-APP_NAME = "AnimaLora Studio"
+APP_NAME = "LemongrassisLora"
 
 #: Markers used to decide "is this directory the repo root". Both are required -- checking
 #: only requirements.txt would match a bunch of unrelated Python projects.
@@ -154,7 +154,7 @@ def find_repo(explicit: Optional[str]) -> Path:
         path = Path(explicit).expanduser().resolve()
         if not looks_like_repo(path):
             die(
-                f"{path} is not an AnimaLoraStudio checkout",
+                f"{path} is not an LemongrassisLora checkout",
                 f"expected to find {' and '.join(REPO_MARKERS)} there",
             )
         return path
@@ -170,7 +170,7 @@ def find_repo(explicit: Optional[str]) -> Path:
             return candidate
 
     die(
-        "could not find the AnimaLoraStudio files next to this launcher",
+        "could not find the LemongrassisLora files next to this launcher",
         f"put {APP_NAME} in the folder that contains requirements.txt and studio/",
         "or pass --repo <path-to-the-folder>",
     )
@@ -479,11 +479,11 @@ def run_studio(py: Path, repo: Path, mode: Optional[str], passthrough: Sequence[
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="AnimaLoraStudio",
+        prog="LemongrassisLora",
         description=f"{APP_NAME} launcher - sets up the environment and starts the app.",
     )
     p.add_argument("--repo", metavar="PATH",
-                   help="path to the AnimaLoraStudio folder (default: next to this launcher)")
+                   help="path to the LemongrassisLora folder (default: next to this launcher)")
     p.add_argument("--mode", choices=("local", "colab"), default=None,
                    help="pin the runtime mode instead of letting Studio ask/remember")
     p.add_argument("--reinstall", action="store_true",

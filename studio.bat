@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-REM AnimaStudio Windows shortcut -- forwards to: python -m studio
+REM LemongrassisLora Windows shortcut -- forwards to: python -m studio
 REM Usage:
 REM   .\studio.bat                          same as: python -m studio run
 REM   .\studio.bat --reinstall              DELETE venv\ and rebuild (studio_data\ kept)

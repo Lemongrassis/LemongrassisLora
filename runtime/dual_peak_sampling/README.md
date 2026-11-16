@@ -1,7 +1,7 @@
 # Dual Peak Sampling
 
 Experimental, configurable timestep sampling for flow-matching training.
-The reusable package depends only on PyTorch, not on AnimaTrainHub, NumPy,
+The reusable package depends only on PyTorch, not on LemongrassisLora, NumPy,
 Pydantic, a model, or a GPU. It does **not** promise better style fidelity.
 
 ## Standalone use
@@ -9,7 +9,7 @@ Pydantic, a model, or a GPU. It does **not** promise better style fidelity.
 This whole directory can become the root of a separate repository unchanged.
 From that directory, run `pip install .` (or `pip install -e '.[test]'` for
 development), then `python -m pytest`. No package installation is needed inside
-AnimaTrainHub: its runtime directory already exposes this package.
+LemongrassisLora: its runtime directory already exposes this package.
 
 ```python
 import torch
@@ -91,7 +91,7 @@ Inspired by the [Anima style experiment](https://note.com/kuon_noise/n/n82be977f
 and [Style-Friendly SNR](https://arxiv.org/abs/2411.14793). This is a custom
 mixture, not an official implementation or a proven universal style optimum.
 
-## AnimaTrainHub integration
+## LemongrassisLora integration
 
 Select **Dual Peak — два пика для стиля** in the timestep sampling section
 (advanced settings). YAML/CLI mode: `dual_peak`. All package parameters are

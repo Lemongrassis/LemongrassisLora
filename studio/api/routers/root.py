@@ -40,7 +40,7 @@ def root() -> FileResponse | JSONResponse:
         return FileResponse(index, headers=INDEX_HEADERS)
     return JSONResponse(
         {
-            "message": "AnimaTrainHub is running. Build the React app at studio/web/ "
+            "message": "LemongrassisLora is running. Build the React app at studio/web/ "
             "(npm install && npm run build) to enable the new UI."
         }
     )

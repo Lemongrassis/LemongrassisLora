@@ -73,7 +73,7 @@ class WandBPresetConfig(BaseModel):
     id: str = "default"
     label: str = "Default"
     api_key: str = ""
-    project: str = "AnimaLoraStudio"
+    project: str = "LemongrassisLora"
     entity: str = ""
     base_url: str = ""
     mode: str = "online"

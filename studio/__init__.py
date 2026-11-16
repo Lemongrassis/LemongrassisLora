@@ -1,4 +1,4 @@
-"""AnimaStudio — training monitor, config editor, and task queue daemon.
+"""LemongrassisLora — training monitor, config editor, and task queue daemon.
 
 ## Top-level architecture (post-0.11.0 restructure, see ADR-0008)
 

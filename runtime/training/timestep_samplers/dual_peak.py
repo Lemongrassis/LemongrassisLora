@@ -1,4 +1,4 @@
-"""AnimaTrainHub config adapter; the reusable package knows nothing about Studio."""
+"""LemongrassisLora config adapter; the reusable package knows nothing about Studio."""
 
 from dataclasses import fields
 import logging

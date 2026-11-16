@@ -34,7 +34,7 @@ def test_defaults_when_file_missing(secrets_file: Path) -> None:
     assert s.wd14.threshold_general == pytest.approx(0.35)
     joy = next(p for p in s.llm_tagger.presets if p.id == "joycaption")
     assert joy.base_url.startswith("http://")
-    assert s.wandb.active.project == "AnimaLoraStudio"
+    assert s.wandb.active.project == "LemongrassisLora"
     assert s.wandb.current_preset == s.wandb.presets[0].id
 
 

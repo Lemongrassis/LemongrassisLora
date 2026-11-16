@@ -1,6 +1,6 @@
 name: build-launcher
 
-# Build for the one-click launcher (tools/launcher.py -> AnimaLoraStudio.exe).
+# Build for the one-click launcher (tools/launcher.py -> LemongrassisLora.exe).
 #
 # PyInstaller produces an executable for the **host platform** — it can't cross-compile,
 # so the Windows exe can only be built on a windows runner. The Linux one is built
@@ -34,11 +34,11 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact: AnimaLoraStudio-windows
-            binary: dist/AnimaLoraStudio.exe
+            artifact: LemongrassisLora-windows
+            binary: dist/LemongrassisLora.exe
           - os: ubuntu-latest
-            artifact: AnimaLoraStudio-linux
-            binary: dist/AnimaLoraStudio
+            artifact: LemongrassisLora-linux
+            binary: dist/LemongrassisLora
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

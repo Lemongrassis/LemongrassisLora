@@ -18,8 +18,8 @@ vi.mock('../api/client', () => ({
 }))
 
 const INFO = {
-  current: 'G:\\AnimaLoraStudio\\models',
-  default: 'G:\\AnimaLoraStudio\\models',
+  current: 'G:\\LemongrassisLora\\models',
+  default: 'G:\\LemongrassisLora\\models',
   is_custom: false,
   scan: {
     total_files: 7,

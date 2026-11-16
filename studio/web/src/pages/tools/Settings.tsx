@@ -116,7 +116,7 @@ const DEFAULT_WANDB_PRESET = {
   id: 'default',
   label: 'Default',
   api_key: '',
-  project: 'AnimaLoraStudio',
+  project: 'LemongrassisLora',
   entity: '',
   base_url: '',
   mode: 'online' as const,

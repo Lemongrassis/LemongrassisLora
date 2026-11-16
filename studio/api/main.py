@@ -1,4 +1,4 @@
-"""`anima-studio` / `python -m studio.server` uvicorn entry point (extracted from server.py in PR-5).
+"""`lemongrassis-lora` / `python -m studio.server` uvicorn entry point (extracted from server.py in PR-5).
 
 The uvicorn startup string still points at `studio.server:app` — all 130
 route decorators in the legacy server.py register onto `api.app.app` at
@@ -25,7 +25,7 @@ def main() -> None:
 
     local_cache.apply(REPO_ROOT)
 
-    parser = argparse.ArgumentParser(description="AnimaTrainHub daemon")
+    parser = argparse.ArgumentParser(description="LemongrassisLora daemon")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument(
@@ -39,7 +39,7 @@ def main() -> None:
     os.environ["ALS_STUDIO_PORT"] = str(args.port)
 
     # ADR 0012: the SPA entry point is at the root path / (no longer under the /studio subpath).
-    print(f"[AnimaTrainHub] http://{args.host}:{args.port}/")
+    print(f"[LemongrassisLora] http://{args.host}:{args.port}/")
     uvicorn.run(
         "studio.server:app",
         host=args.host,

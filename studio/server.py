@@ -1,4 +1,4 @@
-"""AnimaStudio FastAPI server -- PR-8 final shim.
+"""LemongrassisLora FastAPI server -- PR-8 final shim.
 
 server.py used to be a single 4657-line file holding every router, the
 lifespan, middleware, and helper functions. PR-5..PR-6.5 moved all the

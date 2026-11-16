@@ -195,7 +195,7 @@ def find_candidates(
     try:
         req = urllib.request.Request(
             FA_RELEASES_URL + "?per_page=100",
-            headers={"User-Agent": "AnimaLoraStudio"},
+            headers={"User-Agent": "LemongrassisLora"},
         )
         data = json.loads(urllib.request.urlopen(req, timeout=15).read())
     except Exception as exc:  # noqa: BLE001

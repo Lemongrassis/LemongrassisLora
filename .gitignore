@@ -95,7 +95,7 @@ _ui_backup/
 
 # Build output of the one-click launcher (produced by tools/build_launcher.py).
 #
-# `AnimaLoraStudio.exe` (Windows) is **deliberately not** in this list — it's
+# `LemongrassisLora.exe` (Windows) is **deliberately not** in this list — it's
 # committed alongside the repo so that after `git clone` a user can just
 # double-click it, without first hunting for the attachment on Releases.
 # It's built and committed back by .github/workflows/publish-launcher.yml on
@@ -104,7 +104,7 @@ _ui_backup/
 # The non-Windows build output is still ignored: Linux/macOS users just run
 # `./studio.sh` directly and don't need a bootstrapper, so committing it would
 # only add a few extra MB for everyone to download.
-/AnimaLoraStudio
+/LemongrassisLora
 /dist/
 
 # Third-party library cache (pip / HuggingFace / torch / npm / ...) — see

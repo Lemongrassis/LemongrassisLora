@@ -130,7 +130,7 @@ def test_estimate_danbooru_sends_app_user_agent(monkeypatch: pytest.MonkeyPatch)
     assert n == 343
     assert "counts/posts.json" in captured["url"]
     ua = captured["headers"].get("User-Agent", "")
-    assert "AnimaLoraStudio" in ua
+    assert "LemongrassisLora" in ua
 
 
 def test_estimate_danbooru_ua_includes_username_when_provided(
@@ -177,7 +177,7 @@ def test_estimate_gelbooru_sends_app_user_agent(monkeypatch: pytest.MonkeyPatch)
     n = downloader.estimate(opts)
     assert n == 100
     assert "/index.php" in captured["url"]
-    assert "AnimaLoraStudio" in captured["headers"]["User-Agent"]
+    assert "LemongrassisLora" in captured["headers"]["User-Agent"]
 
 
 def test_estimate_returns_negative_one_on_failure(monkeypatch: pytest.MonkeyPatch) -> None:
