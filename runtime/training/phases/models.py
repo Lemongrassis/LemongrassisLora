@@ -244,6 +244,9 @@ def _inject_adapter(ctx: TrainingContext) -> None:
     if getattr(args, "edit_mode", False):
         # Tells generation tools this LoRA expects a source image (cosmos temporal reference).
         ctx.injector.metadata_extra["edit_reference"] = "cosmos_temporal"
+    from training.lora_card import build_card
+    # Pretty LemongrassisLora summary for the saved file's header (not the config)
+    ctx.injector.metadata_card = build_card(args, ctx.injector, ctx.family.spec.family_id, ctx.model)
     ctx.injector.inject(ctx.model)
     after_inject = getattr(ctx.family, "after_adapter_inject", None)
     if callable(after_inject):

@@ -803,6 +803,12 @@ class LycorisAdapter:
             meta["ss_train_norm_export_format"] = "comfyui_diff"
         if self.text_adapter is not None:
             meta["ss_text_encoder_lr"] = str(self.text_encoder_lr)
+        # LemongrassisLora card (runtime/training/lora_card.py), informational only
+        meta.update(getattr(self, "metadata_card", None) or {})
+        # FP32 training still exports the usual file precision (training states keep FP32)
+        save_dtype = getattr(self, "_save_dtype", None)
+        if save_dtype is not None:
+            sd = {key: value.to(save_dtype) if value.is_floating_point() else value for key, value in sd.items()}
         save_file(sd, str(path), metadata=meta)
         logger.info(f"LoRA saved to: {path}")
 
