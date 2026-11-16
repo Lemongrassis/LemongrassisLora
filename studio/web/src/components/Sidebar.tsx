@@ -82,7 +82,6 @@ const I = {
   expand:   svg(<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M10 4v16" /><path d="M5.1 10.4 6.7 12l-1.6 1.6" /></>, 15, 1.8),
   plus:     svg(<path d="M12 5v14M5 12h14" />, 13, 2),
   updown:   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#878e89" strokeWidth="2" strokeLinecap="round"><path d="m8 9 4-4 4 4M8 15l4 4 4-4" /></svg>,
-  brand:    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M5 20 12 4l7 16" /><path d="M8.2 13h7.6" /></svg>,
 }
 
 // ── version status dot (ADR-0007 §11.3-B) ─────────────────────────────────
@@ -549,8 +548,8 @@ export default function Sidebar({
         <div className={`ds-brand ${collapsed ? 'justify-center !px-0' : ''}`}>
           {!collapsed && (
             <>
-              <span className="ds-brand-mark" aria-hidden>{I.brand}</span>
-              <span className="ds-brand-name">Anima<i>TrainHub</i></span>
+              <img className="ds-brand-logo" src="/icons/noal.png" alt="" aria-hidden />
+              <span className="ds-brand-name">Lemongrassis<i>Lora</i></span>
             </>
           )}
           <button
@@ -566,8 +565,8 @@ export default function Sidebar({
       )}
       {mobile && (
         <div className="ds-brand">
-          <span className="ds-brand-mark" aria-hidden>{I.brand}</span>
-          <span className="ds-brand-name">Anima<i>TrainHub</i></span>
+          <img className="ds-brand-logo" src="/icons/noal.png" alt="" aria-hidden />
+          <span className="ds-brand-name">Lemongrassis<i>Lora</i></span>
           <button
             type="button"
             onClick={onMobileClose}

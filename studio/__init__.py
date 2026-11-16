@@ -40,4 +40,4 @@ The single source of truth for the version number across the whole repo:
 Version scheme: MAJOR.MINOR.PATCH (semver, but during the 0.x phase a MINOR
 bump is treated as a breaking change).
 """
-__version__ = "0.20.2"
+__version__ = "1.0.0"

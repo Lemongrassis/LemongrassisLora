@@ -6,7 +6,7 @@
 От сырых картинок до тестовых генераций в одном окне браузера, в том числе с телефона.
 
 [![English](https://img.shields.io/badge/lang-English-18181b?style=flat-square)](README.md)
-[![Version](https://img.shields.io/badge/version-0.20.2--fork-6366f1?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.0.0-6366f1?style=flat-square)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-GPL--3.0-52525b?style=flat-square)](LICENSE)
 [![GPU](https://img.shields.io/badge/NVIDIA-от%206%20ГБ-52525b?style=flat-square)](#требования)
 [![UI](https://img.shields.io/badge/UI-RU%20·%20EN-52525b?style=flat-square)](#)

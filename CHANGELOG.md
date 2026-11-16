@@ -5,6 +5,37 @@
 
 ---
 
+## v1.0.0 — 2026-11-16
+
+First release under the LemongrassisLora name: three model families, a richer training toolbox and a summary card inside every trained LoRA
+
+### Highlights
+
+- **New name: LemongrassisLora**
+  The studio, the launcher (`LemongrassisLora.exe`), the docs and the sidebar logo now carry the new name. Projects, settings and paths stay where they were.
+
+- **A LemongrassisLora card in every LoRA file**
+  Each saved `.safetensors` gets a short summary in its metadata — project, base model, network and LoKr factor, rank/alpha, batch size and timestep sampling. ComfyUI, SwarmUI, Forge and Civitai show it in their LoRA info panels. Loading is unchanged.
+
+- **Three model families**
+  Anima (including 2.9B), Krea 2 (Raw training with Turbo previews, ConvRot INT8 and fp8 bases) and MOSS Image Base (ConvRot INT8, text-encoder offloading, Muon and Riemann LoRA).
+
+### Training
+
+- SinkGD optimizer and ReREX learning-rate schedule.
+- Caption variations for families that cache text embeddings.
+- Per-image loss watch with per-image learning rate, and epoch-level adaptive LR.
+- Low-noise timestep quota and tone anchor against learning the dataset's overall tone.
+- MOSS training previews through a distilled Turbo LoRA; `dpmpp_sde` sampler.
+- Edit LoRA: before → after image pairs for instruction-style edit adapters.
+- Crash auto-restart, partial gradient checkpointing, resume from a mid-epoch step.
+
+### Docs
+
+- README restructured around supported models, quick start and features, with new screenshots.
+
+---
+
 ## v0.20.2 — 2026-07-19
 
 Fixes LoKr training with Krea 2 FP8 base models and long-tag overflow on the regularization page

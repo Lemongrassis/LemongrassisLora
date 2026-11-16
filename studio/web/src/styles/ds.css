@@ -40,6 +40,7 @@
 .ds-side{display:flex;flex-direction:column;border-right:1px solid var(--line);min-height:0}
 .ds-brand{display:flex;align-items:center;gap:9px;height:52px;padding:0 18px;flex:none}
 .ds-brand-mark{width:25px;height:25px;border-radius:7px;background:var(--ink);display:grid;place-items:center;color:#fff;flex:none}
+.ds-brand-logo{width:28px;height:28px;object-fit:contain;flex:none;margin:-2px 0}
 .ds-brand-name{font-size:13.5px;font-weight:600;letter-spacing:-.02em}
 .ds-brand-name i{font-style:normal;color:var(--ink-3);font-weight:500}
 .ds-sidenav{flex:1;min-height:0;display:flex;flex-direction:column;gap:2px;padding:0 12px 14px}

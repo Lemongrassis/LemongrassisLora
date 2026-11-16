@@ -8,7 +8,7 @@
 From raw images to test renders in one browser window — on your PC, in Colab or from your phone.
 
 [![Русский](https://img.shields.io/badge/lang-Русский-18181b?style=flat-square)](README.ru.md)
-[![Version](https://img.shields.io/badge/version-0.20.2--fork-84cc16?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.0.0-84cc16?style=flat-square)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-GPL--3.0-52525b?style=flat-square)](LICENSE)
 [![Models](https://img.shields.io/badge/models-Anima%20·%20Krea%202%20·%20MOSS-52525b?style=flat-square)](#-supported-models)
 [![GPU](https://img.shields.io/badge/NVIDIA-6%20GB+-52525b?style=flat-square)](#-requirements)
