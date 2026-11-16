@@ -58,9 +58,15 @@ PROJECT_SPECIFIC_FIELDS: frozenset[str] = frozenset({
 #: made, from a preset or automatically; the user can change them afterwards).
 #: - Edit texts are sentences: tag shuffling / dropout would scramble them, and a
 #:   horizontal flip mirrors any text in the images.
-#: - Training values follow the published Anima control/edit LoRA recipe
-#:   (levzzz5154/diffusion-pipe anima_canny_lora.toml): rank 32, AdamW 2e-5,
-#:   grad accum 4, 100 warmup steps; 1024 px.
+#: - Capacity follows the YAAE v0.2 Anima edit LoRA (read from its weights):
+#:   rank 128 / alpha 128 with the adaLN modulation layers trained too; it was
+#:   multi-resolution (512/1024/1536) -- 1536 is left out, the reference frame
+#:   doubles the sequence and does not fit 12 GB. 1024 goes first: previews
+#:   are drawn at the first resolution, and 512 renders generic and detail-poor.
+#: - Optimizer follows levzzz5154/diffusion-pipe anima_canny_lora.toml: AdamW
+#:   2e-5, betas (0.9, 0.99), weight decay 0.01, grad accum 4, 100 warmup steps.
+#: - 24 epochs: edits that move geometry (pose, view) need more steps than the
+#:   canny recipe's 15; checkpoints every 2 epochs pick the best one.
 #: - Empty sample prompts: previews redo the first examples with their own text.
 #: - No held-out validation split: it moves results away from their inputs.
 EDIT_CONFIG_DEFAULTS: dict[str, Any] = {
@@ -69,16 +75,19 @@ EDIT_CONFIG_DEFAULTS: dict[str, Any] = {
     "tag_dropout": 0.0,
     "flip_augment": False,
     "lora_type": "lora",
-    "lora_rank": 32,
-    "lora_alpha": 32.0,
+    "lora_rank": 128,
+    "lora_alpha": 128.0,
+    "lora_train_adaln": True,
     "optimizer_type": "adamw",
+    "optimizer_args": ["betas=(0.9, 0.99)"],
     "learning_rate": 2e-5,
+    "weight_decay": 0.01,
     "lr_scheduler": "cosine_with_warmup",
     "lr_scheduler_warmup_steps": 100,
-    "epochs": 12,
+    "epochs": 24,
     "batch_size": 1,
     "grad_accum": 4,
-    "resolution": [1024],
+    "resolution": [1024, 512],
     "train_text_encoder": False,
     "train_norm": False,
     "sample_prompt": "",

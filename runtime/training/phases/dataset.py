@@ -168,6 +168,10 @@ def run(ctx: TrainingContext) -> None:
         aspect_ratio_limit=ar_limit,
         load_masks=load_masks,
         control_dir=control_dirs or None,
+        caption_variations=int(getattr(args, "moss_caption_variations", 0) or 0),
+        caption_keep_tags=int(getattr(args, "moss_caption_keep_tags", 1) or 0),
+        caption_variation_tag_dropout=float(getattr(args, "moss_caption_tag_dropout", 0.0) or 0.0),
+        caption_variation_seed=int(getattr(args, "seed", 0) or 0),
         **native_kwargs,
     )
     ctx.dataset = ctx.base_dataset

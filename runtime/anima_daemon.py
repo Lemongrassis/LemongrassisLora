@@ -109,7 +109,8 @@ def _lora_topology(meta: LoRAMeta) -> tuple:
     reg = meta.lora_reg_dims
     reg_key: Any = tuple(sorted(reg.items())) if reg else None
     return (meta.rank, meta.alpha, meta.algo, meta.factor,
-            meta.weight_decompose, meta.rs_lora, reg_key, meta.has_text_encoder)
+            meta.weight_decompose, meta.dora_axis, meta.dora_compute, meta.rs_lora,
+            reg_key, meta.has_text_encoder, meta.has_adaln)
 
 
 def _load_lora_state_dict(path: str, device: str, dtype: Any) -> dict[str, Any]:

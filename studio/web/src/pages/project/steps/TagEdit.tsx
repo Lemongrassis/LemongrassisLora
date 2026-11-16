@@ -489,7 +489,7 @@ export default function TagEditPage() {
                 </div>
               </div>
               <div style={{ padding: '0 17px 14px', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-                <TagEditor tags={activeTags} onChange={updateActiveTags} triggerWord={activeVersion.trigger_word || undefined} />
+                <TagEditor tags={activeTags} onChange={updateActiveTags} triggerWord={activeVersion.trigger_word || undefined} onNext={() => navActive(1)} />
               </div>
             </>
           ) : (

@@ -79,6 +79,13 @@ def caption_sidecar_path(image_path) -> Path:
     return image.with_name(image.name + _SIDECAR_SUFFIX)
 
 
+def caption_variant_sidecar_path(image_path, caption: str) -> Path:
+    """Sidecar for one of an image's several caption variations: they can't share one file."""
+
+    image = Path(image_path)
+    return image.with_name(f"{image.name}.{caption_sha256(caption)[:16]}{_SIDECAR_SUFFIX}")
+
+
 def prompt_cache_path(root, text_fingerprint: str) -> Path:
     """Path to the aggregated sample/negative prompt cache (isolated by TE fingerprint).
 

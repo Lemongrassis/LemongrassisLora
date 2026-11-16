@@ -39,7 +39,8 @@ class _BrownianTreeNoiseSampler:
     original device, replicating ComfyUI's cpu=True RNG behavior.
     """
 
-    def __init__(self, x: torch.Tensor, sigma_min: float, sigma_max: float, seed: Optional[int] = None):
+    def __init__(self, x: torch.Tensor, sigma_min: float, sigma_max: float, seed: Optional[int] = None,
+                 *, cpu: bool = True):
         from torchsde import BrownianTree
 
         # ComfyUI: transform=identity, t0=sigma_min, t1=sigma_max. Store the
@@ -56,7 +57,7 @@ class _BrownianTreeNoiseSampler:
         # cpu=True: the tree lives on CPU, so w0 is on CPU too
         self._device = x.device
         self._dtype = x.dtype
-        self._w0 = torch.zeros_like(x, device="cpu")
+        self._w0 = torch.zeros_like(x, device="cpu") if cpu else torch.zeros_like(x)
         self._tree = BrownianTree(t0, self._w0, t1, entropy=int(seed))
 
     def __call__(self, sigma: float, sigma_next: float) -> torch.Tensor:
@@ -94,21 +95,22 @@ def _build_noise_sampler(
     seed: Optional[int],
     *,
     require_brownian_tree: bool = False,
+    cpu: bool = True,
 ):
     """Prefer BrownianTree (aligned with ComfyUI); falls back to independent Gaussian noise if torchsde is missing."""
     positive = sigmas[sigmas > 0]
     sigma_min = float(positive.min()) if positive.numel() > 0 else 1e-3
     sigma_max = float(sigmas.max())
     try:
-        return _BrownianTreeNoiseSampler(x, sigma_min, sigma_max, seed=seed)
+        return _BrownianTreeNoiseSampler(x, sigma_min, sigma_max, seed=seed, cpu=cpu)
     except ImportError as exc:
         if require_brownian_tree:
             raise RuntimeError(
-                "Comfy parity dpmpp_3m_sde requires torchsde BrownianTree noise"
+                "Comfy parity SDE samplers require torchsde BrownianTree noise"
             ) from exc
         import logging
         logging.getLogger(__name__).warning(
-            "torchsde is not installed; dpmpp_3m_sde is falling back to independent Gaussian noise (behavior will diverge from ComfyUI / er_sde)"
+            "torchsde is not installed; this SDE sampler is falling back to independent Gaussian noise (behavior will diverge from ComfyUI)"
         )
         return _gaussian_noise_sampler(x, seed=seed)
 

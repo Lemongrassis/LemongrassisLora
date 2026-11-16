@@ -77,6 +77,7 @@ def run(ctx: TrainingContext) -> None:
 
     # Restore from training state (resume from checkpoint)
     if getattr(args, "resume_state", "") and Path(args.resume_state).exists():
+        _extras: dict = {}
         (
             ctx.start_epoch, ctx.global_step, ctx.loss_history, saved_monitor_state,
             ctx.resume_batch_offset,
@@ -87,7 +88,12 @@ def run(ctx: TrainingContext) -> None:
             scaler=ctx.scaler,
             expected_family=ctx.family.spec.family_id,
             ema=ctx.ema,
+            extras_out=_extras,
         )
+        for _name in ("loss_watch", "adaptive_lr"):
+            _obj = getattr(ctx, _name, None)
+            if _obj is not None and _extras.get(_name):
+                _obj.load_state_dict(_extras[_name])
         ctx.emit(f"Resumed training from checkpoint: epoch={ctx.start_epoch}, step={ctx.global_step}")
 
         # Restore the monitor panel's historical data (loss curve etc.)
@@ -156,13 +162,17 @@ def run(ctx: TrainingContext) -> None:
     if not ctx.sample_prompts and args.sample_prompt:
         ctx.sample_prompts = [args.sample_prompt]
     ctx.sample_prompt_idx = 0
-    if bool(getattr(args, "edit_mode", False)) and not ctx.sample_prompts:
+    if bool(getattr(args, "edit_mode", False)):
         # Edit training without preview prompts: redo the first examples (their
         # input images + their text), so previews show whether "after" comes out.
+        # A pause snapshot stores these example texts as sample_prompts; on resume
+        # they come back as args, so matching texts re-tie them to their inputs
+        # (otherwise previews rotate one text over the first example's input).
         picks = _edit_preview_examples(ctx, limit=3)
-        ctx.sample_prompts = [caption for caption, _ in picks]
-        ctx.sample_refs = [refs for _, refs in picks]
-        if picks:
+        captions = [caption for caption, _ in picks]
+        if picks and (not ctx.sample_prompts or list(ctx.sample_prompts) == captions):
+            ctx.sample_prompts = captions
+            ctx.sample_refs = [refs for _, refs in picks]
             ctx.emit(f"Edit previews: {len(picks)} training example(s) redone at each sample")
 
     # Step 0 initial sampling (baseline result, tests all prompts)

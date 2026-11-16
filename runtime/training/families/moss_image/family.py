@@ -46,6 +46,16 @@ def _text_layer_bytes(path):
 class MossFamily:
     spec = MOSS_SPEC
 
+    def preview_base(self, args, model):
+        """Previews through a distilled Turbo LoRA (``sample_turbo_lora``), else None."""
+        if not getattr(args, "sample_turbo_lora", False):
+            return None
+        path = str(getattr(args, "sample_turbo_lora_path", "") or "").strip()
+        if not path:
+            raise ValueError("Previews are set to use a Turbo LoRA, but its file (sample_turbo_lora_path) is empty")
+        from .turbo_lora import MossTurboLora
+        return MossTurboLora(model, path, strength=getattr(args, "sample_turbo_lora_strength", 1.0))
+
     def swappable_blocks(self, *, checkpoint_path=""):
         from modeling.moss_image.model import MOSS_IMAGE_CONFIG
         return MOSS_IMAGE_CONFIG["num_layers"]
@@ -176,10 +186,22 @@ class MossFamily:
             args.train_norm = True
 
     def after_adapter_inject(self, model, injector, args):
-        from .experimental import BlockModulation, IMAGE_TOKENS_ONLY_KEY, install_image_token_mask
+        from .experimental import (
+            BlockModulation,
+            IMAGE_TOKENS_ONLY_KEY,
+            init_down_from_weight_svd,
+            init_down_gaussian,
+            install_image_token_mask,
+        )
         if getattr(args, IMAGE_TOKENS_ONLY_KEY, False):
             install_image_token_mask(model, injector.network)
             injector.metadata_extra[IMAGE_TOKENS_ONLY_KEY] = "true"
+        if getattr(args, "moss_gaussian_init", False):
+            init_down_gaussian(injector.network)
+            injector.metadata_extra["moss_down_init"] = "gaussian"
+        if getattr(args, "moss_svd_init", False):
+            init_down_from_weight_svd(injector.network)
+            injector.metadata_extra["moss_down_init"] = "weight_svd"
         if getattr(args, "moss_block_modulation", False):
             network = injector.network
             module = BlockModulation(

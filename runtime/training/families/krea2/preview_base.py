@@ -106,6 +106,8 @@ class Krea2PreviewBase:
     """Swaps the frozen base weights of a loaded Krea2 model for previews."""
 
     Unavailable = PreviewBaseUnavailable
+    #: Extra sample_image arguments for previews on this base
+    sample_kwargs = {"distilled": True}
 
     def __init__(self, model: torch.nn.Module, train_path: str | Path,
                  preview_path: str | Path, *, config: Krea2Config = KREA2_CONFIG) -> None:

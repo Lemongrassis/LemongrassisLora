@@ -500,6 +500,23 @@ def test_normalize_peft_lora_sd_converts_keys_and_infers_rank():
     assert normalized["lora_unet_blocks_0_q.lora_up.weight"].shape == (8, 4)
 
 
+def test_normalize_peft_lora_sd_accepts_kohya_factor_names():
+    """MOSS-Image-Base-8-steps-dmd: diffusion_model.* keys with lora_down / lora_up factors."""
+    from studio.services.inference.core import _normalize_peft_lora_sd
+
+    down, up = torch.randn(2, 8), torch.randn(8, 2)
+    normalized, max_rank, reg_dims = _normalize_peft_lora_sd({
+        "diffusion_model.layers.0.proj.q.lora_down.weight": down,
+        "diffusion_model.layers.0.proj.q.lora_up.weight": up,
+        "diffusion_model.layers.0.proj.q.alpha": torch.tensor(1.0),
+    })
+
+    assert (max_rank, reg_dims) == (2, None)
+    assert normalized["lora_unet_layers_0_proj_q.lora_down.weight"] is down
+    assert normalized["lora_unet_layers_0_proj_q.lora_up.weight"] is up
+    assert float(normalized["lora_unet_layers_0_proj_q.alpha"]) == 1.0
+
+
 def test_normalize_peft_lora_sd_passthrough_and_rejects():
     import pytest
 

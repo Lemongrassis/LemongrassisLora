@@ -56,7 +56,7 @@ def _edit_references(ctx: TrainingContext) -> list:
 
 @contextmanager
 def preview_base_scope(ctx: TrainingContext) -> Iterator[bool]:
-    """Keep the preview base (Krea2 Turbo) swapped in for the body.
+    """Keep the preview base (Krea2 Turbo, MOSS Turbo LoRA) swapped in for the body.
 
     Yields False when it can't be swapped in (the training weights are intact;
     previews are skipped rather than drawn on the training base with Turbo
@@ -97,7 +97,7 @@ def run_sample(
     - wandb: log_image is called if wandb_key is given; caption / step are passed along too
     - monitor_state.json: always tries to push sample_path to the frontend preview
     - seed_offset: in baseline mode, offset by i so multiple test prompts produce different images
-    - preview base (Krea2 Turbo): swapped in around the sample, with its own steps / guidance
+    - preview base (Krea2 Turbo, MOSS Turbo LoRA): swapped in around the sample, with its own steps / guidance
 
     sample_path must be decided by the caller (baseline numbering / step /
     epoch is not this function's concern).
@@ -154,11 +154,13 @@ def _draw_sample(
         getattr(args, "sample_scheduler", spec.sampling.default_scheduler)
         or spec.sampling.default_scheduler
     )
-    # Turbo previews: distilled sampling with Turbo's own steps / guidance
-    on_preview_base = getattr(ctx, "preview_base", None) is not None
-    if on_preview_base:
+    sample_kwargs = {"sampler_name": s_sampler, "scheduler": s_sched}
+    # Turbo previews: the steps / guidance they are distilled for, plus what the base fixes
+    preview_base = getattr(ctx, "preview_base", None)
+    if preview_base is not None:
         s_steps = int(getattr(args, "sample_turbo_steps", 8) or 8)
         s_cfg = float(getattr(args, "sample_turbo_cfg", 1.0) or 1.0)
+        sample_kwargs.update(preview_base.sample_kwargs)
 
     # T-LoRA: matches ControlGenAI/T-LoRA's official inference -- the sample
     # stage should not apply the timestep mask. The official inferencer
@@ -187,6 +189,10 @@ def _draw_sample(
     _log_vram_watermark("before sampling", peak_label="training step")
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    preview_strength = float(getattr(args, "moss_sample_lora_strength", 1.0))
+    set_strength = getattr(ctx.injector, "set_multiplier", None) if preview_strength != 1.0 else None
+    if set_strength is not None:
+        set_strength(preview_strength)
     try:
         with optimizer_eval_mode(ctx.optimizer):
             ctx.model.eval()
@@ -196,12 +202,10 @@ def _draw_sample(
                 ctx.model, ctx.vae, ctx.text_stack,
                 prompt, height=s_h, width=s_w, steps=s_steps, cfg_scale=s_cfg,
                 negative_prompt=s_neg,
-                sampler_name=s_sampler,
-                scheduler=s_sched,
                 device=ctx.device, dtype=ctx.dtype,
                 seed=(s_seed + seed_offset) if s_seed else None,
                 **({"reference_images": references} if references else {}),
-                **({"distilled": True} if on_preview_base else {}),
+                **sample_kwargs,
             )
             img.save(sample_path)
             ctx.emit(f"Sample saved: {sample_path.name}")
@@ -221,6 +225,8 @@ def _draw_sample(
     except Exception as exc:
         logger.warning("Sampling failed, skipped this preview, training not interrupted: %s", exc, exc_info=True)
     finally:
+        if set_strength is not None:
+            set_strength(1.0)
         if was_training:
             ctx.model.train()
         else:

@@ -15,6 +15,32 @@ import math
 
 import torch
 
+#: Floor of the BSMNTW bell, exp(-2 * 0.5^2): its value at t = 0 and t = 1.
+_BSMNTW_FLOOR = math.exp(-0.5)
+
+
+def _bsmntw_raw(t: torch.Tensor) -> torch.Tensor:
+    """Unnormalized BSMNTW bell: exp(-2 (t - 0.5)^2) minus its endpoint value (0 at t = 0 and 1)."""
+    return (torch.exp(-2.0 * (t - 0.5) ** 2) - _BSMNTW_FLOOR).clamp_min(0.0)
+
+
+def _bsmntw_norm() -> float:
+    """Mean of the raw bell over DiffSynth-Studio's Krea-2 training grid.
+
+    DiffSynth builds 1000 training sigmas from t = linspace(1, 0, 1001)[:-1]
+    shifted by exp(mu), mu = 0.8, and scales the bell to mean 1 over that
+    grid (``FlowMatchScheduler.set_training_weight``). The same constant is
+    used for every sampler here, so with uniform + timestep_schedule_shift
+    exp(0.8) the weights equal DiffSynth's; other samplers keep the same curve.
+    """
+    s = math.exp(0.8)
+    u = torch.linspace(1.0, 0.0, 1001, dtype=torch.float64)[:-1]
+    sigmas = s / (s + (1.0 / u - 1.0))
+    return float(_bsmntw_raw(sigmas).mean())
+
+
+_BSMNTW_NORM = _bsmntw_norm()
+
 
 def compute_loss_weight(
     t: torch.Tensor,
@@ -32,6 +58,9 @@ def compute_loss_weight(
       detail_inv_t  -- w = 1/t clamped to [detail_inv_t_min, detail_inv_t_max],
                       mild detail boost, friendly to small batches + Prodigy; default [1,5]
       cosmap        -- SD3 cosmap weighting, more even across mid t (max/min ~= 1.81x)
+      bsmntw        -- DiffSynth-Studio's training weight (ModelScope trainer): a bell
+                      exp(-2 (t-0.5)^2) shifted to 0 at t=0 and t=1, peak ~1.69 at t=0.5,
+                      mean 1 over DiffSynth's Krea-2 grid; weight_cap_ratio does not apply
 
     weight_cap_ratio -- cap on the batch's max/min ratio (0=disabled), prevents a single sample
                         from dominating and breaking Prodigy's d estimate
@@ -44,6 +73,9 @@ def compute_loss_weight(
     scheme = (scheme or "none").lower()
     if scheme == "none":
         return torch.ones_like(t)
+    if scheme == "bsmntw":
+        # Endpoint weights are 0 by design, so a max/min cap would zero the batch: skip it
+        return (_bsmntw_raw(t.float()) / _BSMNTW_NORM).to(dtype=t.dtype)
 
     eps = 1e-4
     t_c = t.clamp(eps, 1 - eps)

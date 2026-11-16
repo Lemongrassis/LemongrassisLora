@@ -51,7 +51,7 @@ const SUBGROUPS: Record<string, Subgroup[]> = {
   lora: [
     { key: 'loraMain', fields: ['lora_type', 'lora_rank', 'lora_alpha', 'lokr_factor', 'tlora_min_rank', 'tlora_alpha_rank_scale', 'tlora_use_ortho'], rest: true },
     { key: 'loraDropout', fields: ['caption_dropout', 'lora_dropout', 'lora_rank_dropout', 'lora_module_dropout'] },
-    { key: 'loraExtra', fields: ['lora_dora', 'lora_rs', 'train_norm'] },
+    { key: 'loraExtra', fields: ['lora_dora', 'lora_dora_axis', 'lora_dora_compute', 'lora_train_adaln', 'lora_rs', 'train_norm'] },
     { key: 'loraBlocks', fields: ['lora_reg_dims'] },
   ],
   dataset: [
@@ -79,7 +79,7 @@ const SUBGROUPS: Record<string, Subgroup[]> = {
   ],
   sample: [
     { key: 'sampleMain', fields: [], rest: true },
-    { key: 'sampleBase', fields: ['sample_base', 'sample_turbo_path', 'sample_turbo_steps', 'sample_turbo_cfg'] },
+    { key: 'sampleBase', fields: ['sample_base', 'sample_turbo_path', 'sample_turbo_lora', 'sample_turbo_lora_path', 'sample_turbo_lora_strength', 'sample_turbo_steps', 'sample_turbo_cfg'], switchesFirst: true },
   ],
 }
 

@@ -74,7 +74,7 @@ class GenerateConfig(BaseModel):
     height: int = Field(1024, ge=256, le=4096)
     steps: int = Field(25, ge=1, le=150)
     cfg_scale: float = Field(4.0, ge=0.0, le=20.0)
-    sampler_name: Literal["er_sde", "dpmpp_3m_sde", "euler"] = Field("er_sde")
+    sampler_name: Literal["er_sde", "dpmpp_3m_sde", "euler", "dpmpp_sde", "dpmpp_sde_gpu"] = Field("er_sde")
     scheduler: Literal["simple", "sgm_uniform"] = Field("simple")
     count: int = Field(1, ge=1, le=32, description="Number of images to generate per prompt")
     seed: int = Field(0, description="Random seed (0 = random)")

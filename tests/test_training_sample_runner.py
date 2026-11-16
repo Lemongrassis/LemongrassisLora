@@ -82,6 +82,36 @@ def test_run_sample_preserves_empty_negative_and_passes_seed(monkeypatch, tmp_pa
     assert "comfy_parity" not in records[-1]
 
 
+@pytest.mark.parametrize("sample_kwargs, expected", [
+    ({"distilled": True}, {"distilled": True, "sampler_name": "er_sde", "scheduler": "simple"}),  # Krea2 Turbo
+    ({"sampler_name": "euler", "scheduler": "simple"}, {"sampler_name": "euler", "scheduler": "simple"}),  # MOSS LoRA
+])
+def test_run_sample_on_a_preview_base_uses_its_settings(tmp_path, sample_kwargs, expected) -> None:
+    from contextlib import contextmanager
+
+    records: list[dict] = []
+
+    def fake_sample_image(*_args, **kwargs):
+        records.append(kwargs)
+        return FakeImage()
+
+    @contextmanager
+    def swapped():
+        yield
+
+    ctx = _ctx()
+    ctx.family.sample_image = fake_sample_image
+    ctx.args.sample_turbo_steps, ctx.args.sample_turbo_cfg = 8, 2.0
+    ctx.preview_base = SimpleNamespace(
+        active=False, swapped=swapped, Unavailable=RuntimeError, sample_kwargs=sample_kwargs,
+    )
+    sample_runner.run_sample(ctx, prompt="1girl", sample_path=tmp_path / "sample.png")
+
+    assert (records[-1]["steps"], records[-1]["cfg_scale"]) == (8, 2.0)
+    assert {key: records[-1][key] for key in expected} == expected
+    assert ("distilled" in records[-1]) == ("distilled" in expected)
+
+
 def test_run_sample_clears_tlora_timestep_mask_before_sampling(monkeypatch, tmp_path) -> None:
     """#215 T-LoRA: the training-mode mask must be cleared before sampling (regression anchor for the merge-conflict fix)."""
     ctx = _ctx()

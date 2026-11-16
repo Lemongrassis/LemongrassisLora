@@ -352,6 +352,7 @@ export const ARTICLES_RU: WikiArticle[] = [
         ['min_snr', 'гасит доминирование лосса на шумном конце; проверен лучше всех', '[[param:min_snr_gamma]] 5.0 (3–7)'],
         ['detail_inv_t', 'усиление деталей, вес ∝ 1/t', '[[param:detail_inv_t_min]] / [[param:detail_inv_t_max]] = 1 / 5'],
         ['cosmap', 'косинусное отображение SD3', 'экспериментально'],
+        ['bsmntw', '«колокол» тренера DiffSynth-Studio (ModelScope): пик ~1.7× при t=0.5, ноль на краях', 'как у ModelScope для Krea 2: [[param:timestep_sampling]] = uniform, [[param:timestep_schedule_shift]] = 2.2255'],
       ] } },
       { p: 'Со style_friendly Min-SNR почти ничего не делает, а detail_inv_t противоречит ему. Для стиля оставляйте `none`.' },
       { h: 'Тип лосса' },

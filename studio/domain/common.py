@@ -76,7 +76,7 @@ MODEL_FAMILIES: tuple[str, ...] = tuple(FAMILY_CAPABILITIES)
 # in families/anima/sampling.py; krea2: same in families/krea2/sampling.py),
 # so a cross-family value errors out at the config layer (fail-fast).
 FAMILY_SAMPLING: dict[str, dict[str, tuple[str, ...]]] = {
-    "moss_image": {"samplers": ("euler",), "schedulers": ("simple", "sgm_uniform")},
+    "moss_image": {"samplers": ("euler", "dpmpp_sde", "dpmpp_sde_gpu"), "schedulers": ("simple", "sgm_uniform")},
     "anima": {
         "samplers": ("er_sde", "dpmpp_3m_sde"),
         "schedulers": ("simple", "sgm_uniform"),
@@ -111,6 +111,7 @@ LEGACY_SAMPLING_FAMILIES: frozenset = frozenset({"anima"})
 #: resolution-aware family reuses this strategy, just add it to the tuple.
 TIMESTEP_SAMPLING_OPTION_FAMILIES: dict[str, tuple[str, ...]] = {
     "moss_logit_normal": ("moss_image",),
+    "moss_truncated_logit_normal": ("moss_image",),
     "krea2_shift": ("krea2",),
 }
 

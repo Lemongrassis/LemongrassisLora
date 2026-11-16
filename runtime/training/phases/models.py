@@ -234,6 +234,13 @@ def _inject_adapter(ctx: TrainingContext) -> None:
     ctx.injector.metadata_extra = ctx.family.lora_metadata()
     if getattr(args, "moss_image_tokens_only", False):
         ctx.injector.force_bypass = True
+    if getattr(args, "lora_fp32", False):
+        ctx.injector.fp32_weights = True
+    up_multiplier = float(getattr(args, "lora_up_lr_multiplier", 1.0) or 1.0)
+    if up_multiplier != 1.0:
+        ctx.injector.up_lr_multiplier = up_multiplier
+        ctx.injector.up_base_lr = float(args.learning_rate)
+        ctx.injector.metadata_extra["lora_up_lr_multiplier"] = str(up_multiplier)
     if getattr(args, "edit_mode", False):
         # Tells generation tools this LoRA expects a source image (cosmos temporal reference).
         ctx.injector.metadata_extra["edit_reference"] = "cosmos_temporal"

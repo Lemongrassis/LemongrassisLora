@@ -26,6 +26,7 @@ from training.optimizers import (
     prodigy,
     prodigy_plus_schedulefree,
     simplified_ademamix,
+    sinkgd,
     soap,
     soap_sf,
 )
@@ -44,6 +45,7 @@ BUILDERS: dict[str, Callable] = {
     "prodigy": prodigy.build,
     "prodigy_plus_schedulefree": prodigy_plus_schedulefree.build,
     "simplified_ademamix": simplified_ademamix.build,
+    "sinkgd": sinkgd.build,
     "soap": soap.build,
     "soap_sf": soap_sf.build,
 }
@@ -53,6 +55,7 @@ VALIDATORS: dict[str, Callable[[object], None]] = {
     "adamw8bit": adamw8bit.validate,
     "automagic": automagic.validate,
     "prodigy_plus_schedulefree": prodigy_plus_schedulefree.validate,
+    "sinkgd": sinkgd.validate,
     "soap_sf": soap_sf.validate,
     "muon": muon.validate,
 }

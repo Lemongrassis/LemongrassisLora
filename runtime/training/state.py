@@ -27,6 +27,7 @@ def save_training_state(
     loss_history=None, rng_state=None, monitor_state=None,
     scheduler=None, timestep_sampler=None, sra_aligner=None,
     scaler=None, model_family=None, ema=None, epoch_batch_offset=0,
+    extras=None,
 ):
     """Save the full training state, to support resuming from checkpoint.
 
@@ -84,6 +85,9 @@ def save_training_state(
             state["ema_state"] = ema.state_dict()
         except Exception as e:  # noqa: BLE001
             logger.warning(f"ema.state_dict() failed (skipped): {e}")
+    if extras:
+        # Small plain-data states of optional helpers (loss watch, adaptive LR), by name
+        state["extras"] = extras
     if scaler is not None:
         # fp16 GradScaler's scale factor / growth tracker. Without it on
         # resume, it resets to the default 2^16, and the first few steps
@@ -106,7 +110,7 @@ def save_training_state(
     logger.info(f"Training state saved: {path} (epoch={epoch}, step={global_step})")
 
 
-def load_training_state(path, injector, optimizer, scheduler=None, timestep_sampler=None, sra_aligner=None, scaler=None, expected_family=None, ema=None):
+def load_training_state(path, injector, optimizer, scheduler=None, timestep_sampler=None, sra_aligner=None, scaler=None, expected_family=None, ema=None, extras_out=None):
     """Load training state, returns (epoch, global_step, loss_history, monitor_state, epoch_batch_offset).
 
     epoch_batch_offset: batches already consumed in the recovery point's epoch
@@ -182,6 +186,10 @@ def load_training_state(path, injector, optimizer, scheduler=None, timestep_samp
             logger.info("EMA shadow weights restored")
         except Exception as e:  # noqa: BLE001
             logger.warning(f"EMA shadow restore failed (rebuilding it): {e}")
+
+    # Optional helpers: their states go back to the caller, which owns those objects
+    if extras_out is not None:
+        extras_out.update(state.get("extras") or {})
 
     # Restore RNG state
     if "rng_state" in state:

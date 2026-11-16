@@ -350,6 +350,7 @@ export const ARTICLES_EN: WikiArticle[] = [
         ['min_snr', 'tames loss dominance at the noisy end; the best validated', '[[param:min_snr_gamma]] 5.0 (3–7)'],
         ['detail_inv_t', 'detail boost, weight ∝ 1/t', '[[param:detail_inv_t_min]] / [[param:detail_inv_t_max]] = 1 / 5'],
         ['cosmap', 'SD3 cosine mapping', 'experimental'],
+        ['bsmntw', 'the DiffSynth-Studio (ModelScope) trainer bell: peak ~1.7× at t=0.5, zero at the ends', 'as ModelScope trains Krea 2: [[param:timestep_sampling]] = uniform, [[param:timestep_schedule_shift]] = 2.2255'],
       ] } },
       { p: 'With style_friendly, Min-SNR does almost nothing and detail_inv_t contradicts it. Keep `none` for style.' },
       { h: 'Loss type' },

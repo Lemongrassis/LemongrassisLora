@@ -21,7 +21,7 @@ export type GenerateFamily = 'anima' | 'krea2' | 'moss_image'
 export const SAMPLER_OPTIONS_BY_FAMILY = {
   anima: ['er_sde', 'dpmpp_3m_sde'],
   krea2: ['euler', 'er_sde'],
-  moss_image: ['euler'],
+  moss_image: ['euler', 'dpmpp_sde', 'dpmpp_sde_gpu'],
 } as const satisfies Record<GenerateFamily, readonly string[]>
 
 export const SCHEDULER_OPTIONS_BY_FAMILY = {
@@ -39,7 +39,7 @@ export const FAMILY_GENERATE_DEFAULTS = {
 
 export const DISTILLED_GENERATE_DEFAULTS = { steps: 8, cfgScale: 1.0 } as const
 
-export const SAMPLER_OPTIONS = ['er_sde', 'dpmpp_3m_sde', 'euler'] as const
+export const SAMPLER_OPTIONS = ['er_sde', 'dpmpp_3m_sde', 'euler', 'dpmpp_sde', 'dpmpp_sde_gpu'] as const
 export type SamplerName = (typeof SAMPLER_OPTIONS)[number]
 export const DEFAULT_SAMPLER: SamplerName = 'er_sde'
 

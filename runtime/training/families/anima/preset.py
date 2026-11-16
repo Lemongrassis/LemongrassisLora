@@ -35,6 +35,21 @@ ANIMA_PRESET: dict[str, Any] = {
     ],
 }
 
+# adaLN modulation Linears (blocks.N.adaln_modulation_{self_attn,cross_attn,mlp}.{1,2}):
+# they turn the timestep embedding into per-block shift/scale/gate. Optional
+# targets (lora_train_adaln); final_layer.adaln_modulation is not matched.
+ANIMA_ADALN_TARGETS: list[str] = ["*adaln_modulation_*.1", "*adaln_modulation_*.2"]
+
+
+def anima_preset(*, train_adaln: bool = False) -> dict[str, Any]:
+    """ANIMA_PRESET, optionally extended with the adaLN modulation targets."""
+    if not train_adaln:
+        return ANIMA_PRESET
+    preset = dict(ANIMA_PRESET)
+    preset["target_name"] = [*ANIMA_PRESET["target_name"], *ANIMA_ADALN_TARGETS]
+    return preset
+
+
 ANIMA_TEXT_PRESET: dict[str, Any] = {
     # HF and Comfy wrappers both hold the backbone here. Strip this wrapper
     # so saved keys match ComfyUI's lora_te_layers_* mapping.
