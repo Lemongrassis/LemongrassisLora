@@ -28,6 +28,8 @@ interface Props {
   dirty?: boolean
   /** Trigger word; its chip is shown in green. */
   triggerWord?: string
+  /** Go to the next image (Ctrl+Enter in the first-tag field commits and calls it). */
+  onNext?: () => void
 }
 
 type Mode = 'chip' | 'text'
@@ -36,7 +38,7 @@ const parseLine = (raw: string): string[] =>
   raw.split(/[,\n]/).map((t) => t.trim()).filter(Boolean)
 
 export default function TagEditor({
-  tags, natural, onChange, onSave, saving, dirty, triggerWord,
+  tags, natural, onChange, onSave, saving, dirty, triggerWord, onNext,
 }: Props) {
   const { t } = useTranslation()
   const [draft, setDraft] = useState('')
@@ -168,6 +170,8 @@ export default function TagEditor({
         </div>
       </div>
 
+      <FirstTagField tags={tags} onChange={onChange} onNext={onNext} />
+
       {mode === 'chip' ? (
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
           <DndContext
@@ -268,6 +272,79 @@ export default function TagEditor({
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+/** Replaces tags[0] with `value`; an existing copy of `value` further down is dropped. */
+export function setFirstTag(tags: string[], value: string): string[] {
+  const v = value.trim().replace(/^[,]+|[,]+$/g, '').trim()
+  if (!v) return tags
+  return [v, ...tags.slice(1).filter((x) => x !== v)]
+}
+
+/** Quick field for the first tag (the @artist / trigger slot): Enter replaces it,
+ * Ctrl+Enter replaces it and moves on to the next image with the field still focused. */
+function FirstTagField({ tags, onChange, onNext }: {
+  tags: string[]; onChange: (tags: string[]) => void; onNext?: () => void
+}) {
+  const { t } = useTranslation()
+  const first = tags[0] ?? ''
+  const [value, setValue] = useState(first)
+  const inputRef = useRef<HTMLInputElement>(null)
+  // Follow the image: a new image (or an outside edit) shows its own first tag
+  useEffect(() => { setValue(first) }, [first])
+
+  const commit = (raw: string) => {
+    const next = setFirstTag(tags, raw)
+    if (next !== tags && JSON.stringify(next) !== JSON.stringify(tags)) onChange(next)
+    else setValue(first)
+  }
+  const suggest = useTagSuggest({
+    value,
+    inputRef,
+    wholeAsToken: true,
+    onPick: ({ suggestion }) => { setValue(suggestion.tag); commit(suggestion.tag) },
+  })
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 'none' }}>
+      <span className="ds-cap" style={{ flex: 'none' }}>{t('tagEditor.firstTag')}</span>
+      <span style={{ position: 'relative', display: 'flex', flex: 1, minWidth: 0 }}>
+        <input
+          ref={inputRef}
+          value={value}
+          onChange={(e) => { setValue(e.target.value); suggest.notifyChange() }}
+          onKeyDown={(e) => {
+            if (suggest.handleKeyDown(e)) return
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              commit(value)
+              if ((e.ctrlKey || e.metaKey) && onNext) onNext()
+            } else if (e.key === 'Escape') {
+              setValue(first)
+            }
+          }}
+          onClick={() => suggest.notifyClick()}
+          onFocus={(e) => { e.currentTarget.select(); suggest.notifyFocus() }}
+          onBlur={() => { suggest.notifyBlur(); if (value !== first) commit(value) }}
+          placeholder={t('tagEditor.firstTagPlaceholder')}
+          aria-label={t('tagEditor.firstTag')}
+          title={t('tagEditor.firstTagHint')}
+          className="ds-inp ds-mono"
+          style={{ flex: 1, minWidth: 0, height: 28 }}
+        />
+        <TagSuggestList
+          open={suggest.open}
+          suggestions={suggest.suggestions}
+          activeIdx={suggest.activeIdx}
+          onPick={(s) => suggest.pickAt(suggest.suggestions.indexOf(s))}
+          onHover={suggest.setActiveIdx}
+          inputRef={inputRef}
+          cursor={suggest.cursor}
+          positionDeps={[value]}
+        />
+      </span>
     </div>
   )
 }

@@ -54,7 +54,7 @@ Three independent lenses:
 
 The real-world grounds for Route 1 winning:
 1. The InfoNoise paper's contract (I-MMSE) strictly depends on a single distribution; the mixture generalization is unproven (Lens B admits this as blind spot #1)
-2. 99% of AnimaLoraStudio's current user base is single-character / single-style LoRAs + general-purpose image reg; reg is an auxiliary prior, not a co-training target
+2. 99% of LemongrassisLora's current user base is single-character / single-style LoRAs + general-purpose image reg; reg is an auxiliary prior, not a co-training target
 3. `reg_weight=1.0` in actual community usage semantically means "strong regularization," not "multi-task balanced training"
 4. Low engineering cost (1 field + 1 line of masking); Route 2 would require changing InfoNoise sampler's internal FIFO/EMA accumulators
 

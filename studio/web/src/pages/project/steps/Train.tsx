@@ -997,7 +997,7 @@ const LORA_TYPE_LABEL: Record<string, string> = { lora: 'LoRA', lokr: 'LoKr', lo
 const TRAIN_TABS = [
   { id: 'model', groups: ['model', 'lora', 'optimizer_args'] },
   { id: 'data', groups: ['dataset', 'caption'] },
-  { id: 'optim', groups: ['training', 'timestep_sampling', 'loss', 'noise_augmentation'] },
+  { id: 'optim', groups: ['training', 'timestep_sampling', 'loss', 'noise_augmentation', 'krea2_layers'] },
   { id: 'system', groups: ['system', 'output', 'sample', 'eval_validation', 'monitor'] },
   { id: 'experimental', groups: ['experimental', 'experimental_blocks'] },
   { id: 'finish', groups: ['output'] },

@@ -503,7 +503,7 @@ def test_root_fallback_when_no_dist(
     resp = client.get("/", follow_redirects=False)
     assert resp.status_code == 200
     body = resp.json()
-    assert "AnimaStudio" in body["message"]
+    assert "LemongrassisLora" in body["message"]
 
 
 def test_legacy_studio_path_redirects_to_root(
@@ -530,7 +530,7 @@ def test_uvicorn_run_bounds_graceful_shutdown(
 
     captured: dict[str, object] = {}
     monkeypatch.setattr(uvicorn, "run", lambda *a, **kw: captured.update(kw))
-    monkeypatch.setattr("sys.argv", ["anima-studio"])
+    monkeypatch.setattr("sys.argv", ["lemongrassis-lora"])
     main_mod.main()
     timeout = captured.get("timeout_graceful_shutdown")
     assert isinstance(timeout, (int, float)) and timeout > 0

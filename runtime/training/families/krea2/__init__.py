@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, Iterable
 
 import torch
 
 from ...block_swap import find_block_swap, move_module_excluding
 
-from .preset import KREA2_PRESET
+from .preset import KREA2_PRESET, preset_for_args
 from .sampling import (
     KREA2_BASE_IMAGE_SEQ_LEN,
     KREA2_BASE_SHIFT,
     KREA2_MAX_IMAGE_SEQ_LEN,
     KREA2_MAX_SHIFT,
-    KREA2_RAW_GUIDANCE,
+    KREA2_RAW_CFG,
     KREA2_RAW_STEPS,
     KREA2_SAMPLER,
     KREA2_SCHEDULER,
@@ -129,7 +130,7 @@ KREA2_SPEC = ModelSpec(
         default_sampler=KREA2_SAMPLER,
         default_scheduler=KREA2_SCHEDULER,
         default_steps=KREA2_RAW_STEPS,
-        default_cfg=KREA2_RAW_GUIDANCE,
+        default_cfg=KREA2_RAW_CFG,
         # Comfy-parity convention: fixed mu=1.15 (matches ComfyUI's
         # ModelSamplingFlux; note this value is **mu (pre-exp)**, unlike
         # Anima's ConstantShift, which is a direct factor -- shift_policy's
@@ -147,9 +148,14 @@ KREA2_SPEC = ModelSpec(
 class Krea2Family:
     spec = KREA2_SPEC
 
+    def load_options(self, args):
+        get = args.get if isinstance(args, dict) else lambda k, d: getattr(args, k, d)
+        return {"dit": {"int8_matmul": get("int8_train_matmul", "w8a8") or "w8a8"}}
+
     def load_dit(self, path, device, dtype, *,
                  attention_backend: str = "flash_attn", repo_root=None,
-                 purpose: str = "train", blocks_to_swap: int = 0):
+                 purpose: str = "train", blocks_to_swap: int = 0,
+                 int8_matmul: str = "w8a8"):
         from training.families.krea2.loader import load_krea2_model
 
         if attention_backend != "none":
@@ -159,7 +165,21 @@ class Krea2Family:
             )
         return load_krea2_model(
             path, device, dtype, purpose=purpose, blocks_to_swap=blocks_to_swap,
+            int8_matmul=int8_matmul,
         )
+
+    def preview_base(self, args, model):
+        """Previews on Turbo while training on Raw (``sample_base=turbo``), else None."""
+        if str(getattr(args, "sample_base", "train") or "train") != "turbo":
+            return None
+        path = str(getattr(args, "sample_turbo_path", "") or "").strip()
+        if not path:
+            raise ValueError("Previews are set to Turbo, but the Turbo file (sample_turbo_path) is empty")
+        from training.families.krea2.preview_base import Krea2PreviewBase
+
+        preview = Krea2PreviewBase(model, args.transformer_path, path)
+        logger.info("previews will run on %s (weights swapped in for each preview)", Path(path).name)
+        return preview
 
     def swappable_blocks(self, *, checkpoint_path: str | None = None) -> int:
         """Upper bound on the number of swappable layers (= DiT backbone layer count).
@@ -196,6 +216,14 @@ class Krea2Family:
         from training.families.krea2.loader import swapped_param_ratio
 
         return swapped_param_ratio(blocks_to_swap)
+
+    def inference_resident_bytes(self, blocks_to_swap: int, *, checkpoint_path: str) -> int:
+        """Exact VRAM of the DiT weights at this swap count (from the file header),
+        for the generate-side swap pick: int8 blocks and bf16 non-block tensors
+        make a parameter ratio of the file size undercount it."""
+        from training.families.krea2.loader import resident_bytes
+
+        return resident_bytes(checkpoint_path, blocks_to_swap)
 
     def load_vae(self, path, device, dtype, *, tiling: str = "auto"):
         from training.vae import load_vae
@@ -267,8 +295,9 @@ class Krea2Family:
                      phase_callback=None, seed: int | None = None,
                      vram_policy: str | None = None):
         # First resolve steps and guidance by Raw/Turbo (when steps/cfg aren't
-        # given explicitly, use the family defaults: Raw 28 steps / 4.5, Turbo
-        # 8 steps / 0.0 -- TDM distillation has no uncond, so at guidance=0
+        # given explicitly, use the family defaults: Raw 28 steps / cfg 5.5,
+        # Turbo 8 steps / cfg 1; cfg is ComfyUI's, guidance = cfg - 1) -- TDM
+        # distillation has no uncond, so at guidance=0
         # prepare skips encoding the negative and sampling skips the uncond
         # forward pass).
         resolved_steps, guidance = resolve_sampling_settings(
@@ -336,7 +365,8 @@ class Krea2Family:
             height=height,
             width=width,
             steps=resolved_steps,
-            cfg_scale=guidance,
+            # the ComfyUI cfg again: sample_latents resolves it to the same guidance
+            cfg_scale=cfg_scale,
             sampler_name=sampler_name,
             scheduler=scheduler,
             distilled=distilled,
@@ -349,6 +379,10 @@ class Krea2Family:
 
     def lora_preset(self) -> dict[str, Any]:
         return KREA2_PRESET
+
+    def lora_preset_for_args(self, args) -> dict[str, Any]:
+        """Training: preset without the layer groups switched off in the config."""
+        return preset_for_args(KREA2_PRESET, args)
 
     def lora_metadata(self) -> dict[str, str]:
         return {

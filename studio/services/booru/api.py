@@ -36,7 +36,7 @@ from ... import __version__
 # - an app-name UA both passes the CF filter and satisfies danbooru's TOS
 #   requirement to "use a descriptive User-Agent". gelbooru isn't as strict
 #   but a descriptive UA is recommended there too.
-_USER_AGENT_BASE = f"AnimaLoraStudio/{__version__}"
+_USER_AGENT_BASE = f"LemongrassisLora/{__version__}"
 
 
 def _build_user_agent(username: str = "") -> str:

@@ -1,5 +1,5 @@
 """
-SOAP optimizer (+ Schedule-Free SOAP) for AnimaLoraStudio.
+SOAP optimizer (+ Schedule-Free SOAP) for LemongrassisLora.
 
 This file is adapted from the official SOAP reference implementation:
 https://github.com/nikhilvyas/SOAP

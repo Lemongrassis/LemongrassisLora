@@ -808,7 +808,9 @@ function QueueCard({
       {epochs && <span>{t('queue.epochOf', { n: epochs.n, total: epochs.total })}</span>}
       {run && monitor?.speed ? <span>{monitor.speed.toFixed(2)} it/s</span> : null}
       {s === 'pending' && startsAt != null && finishesAt != null && <span>{t('queue.startAt', { time: fmt.clock(startsAt) })}</span>}
-      {(s === 'paused' || (terminal && task.is_resumable)) && task.last_state_epoch != null && <span className="ds-qnext">{t('queue.resumeFromEpoch', { n: task.last_state_epoch })}</span>}
+      {(s === 'paused' || (terminal && task.is_resumable)) && (task.last_state_step != null
+        ? <span className="ds-qnext">{t('queue.resumeFromStep', { n: task.last_state_step.toLocaleString() })}</span>
+        : task.last_state_epoch != null && <span className="ds-qnext">{t('queue.resumeFromEpoch', { n: task.last_state_epoch })}</span>)}
     </>
   )
 
@@ -861,6 +863,14 @@ function QueueCard({
       {task.error_msg && s === 'failed' && (
         <div className="ds-qcard-note" style={{ color: 'var(--red-text)' }}>
           <span className="font-mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={task.error_msg}>{task.error_msg}</span>
+        </div>
+      )}
+      {!!task.auto_restarts && (
+        <div className="ds-qcard-note" style={{ color: 'var(--ink-3)' }} data-testid={`task-restarts-${task.id}`}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={task.last_crash_msg ? `${t('queue.autoRestartedHint')}
+${task.last_crash_msg}` : undefined}>
+            ↻ {t('queue.autoRestarted', { n: task.auto_restarts })}
+          </span>
         </div>
       )}
       {task.note && (

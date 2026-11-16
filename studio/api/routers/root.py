@@ -22,6 +22,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from ...paths import WEB_DIST
+from ..static import INDEX_HEADERS
 
 router = APIRouter()
 
@@ -36,10 +37,10 @@ def root() -> FileResponse | JSONResponse:
     dist missing → return a JSON hint."""
     index = WEB_DIST / "index.html"
     if index.exists():
-        return FileResponse(index)
+        return FileResponse(index, headers=INDEX_HEADERS)
     return JSONResponse(
         {
-            "message": "AnimaTrainHub is running. Build the React app at studio/web/ "
+            "message": "LemongrassisLora is running. Build the React app at studio/web/ "
             "(npm install && npm run build) to enable the new UI."
         }
     )

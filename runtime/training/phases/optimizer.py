@@ -97,3 +97,9 @@ def run(ctx: TrainingContext) -> None:
     # Adapter weight EMA (ema_start_ratio needs to be scaled by total_steps, hence placed after it)
     from training.ema import build_ema
     ctx.ema = build_ema(args, ctx.trainable_params, ctx.total_steps)
+
+    # Per-image loss watch / per-image LR and the epoch-level adaptive LR
+    from training.adaptive_lr import build_adaptive_lr
+    from training.loss_watch import build_loss_watch
+    ctx.loss_watch = build_loss_watch(args, ctx.output_dir)
+    ctx.adaptive_lr = build_adaptive_lr(args, ctx.optimizer, ctx.scheduler)

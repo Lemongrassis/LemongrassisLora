@@ -43,13 +43,13 @@ def test_looks_like_repo_needs_both_markers(tmp_path: Path) -> None:
 
 
 def test_find_repo_next_to_launcher(tmp_path: Path, isolate_lookup) -> None:
-    repo = make_repo(tmp_path / "AnimaLoraStudio")
+    repo = make_repo(tmp_path / "LemongrassisLora")
     isolate_lookup(repo)
     assert launcher.find_repo(None) == repo
 
 
 def test_find_repo_walks_up_from_subdirectory(tmp_path: Path, isolate_lookup) -> None:
-    repo = make_repo(tmp_path / "AnimaLoraStudio")
+    repo = make_repo(tmp_path / "LemongrassisLora")
     nested = repo / "tools" / "bin"
     nested.mkdir(parents=True)
     isolate_lookup(nested)
@@ -67,7 +67,7 @@ def test_find_repo_explicit_path_rejects_wrong_folder(
     with pytest.raises(SystemExit) as exc:
         launcher.find_repo(str(tmp_path))
     assert exc.value.code == 1
-    assert "is not an AnimaLoraStudio checkout" in capsys.readouterr().err
+    assert "is not an LemongrassisLora checkout" in capsys.readouterr().err
 
 
 def test_find_repo_reports_actionable_error_when_missing(
@@ -76,7 +76,7 @@ def test_find_repo_reports_actionable_error_when_missing(
     with pytest.raises(SystemExit):
         launcher.find_repo(None)
     err = capsys.readouterr().err
-    assert "could not find the AnimaLoraStudio files" in err
+    assert "could not find the LemongrassisLora files" in err
     assert "--repo" in err
 
 

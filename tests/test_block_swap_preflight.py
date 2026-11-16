@@ -311,3 +311,67 @@ def test_run_forwards_checkpoint_path_to_family(monkeypatch) -> None:
 
     assert seen, "preflight never asked the family for any estimate"
     assert all(p == "/nonexistent/model.safetensors" for p in seen)
+
+
+# --- generate-side auto swap count (pick_inference_blocks) ---
+
+
+def _pick(file_bytes: int, free: int | None) -> int:
+    return preflight.pick_inference_blocks(
+        file_bytes=file_bytes, total_blocks=_TOTAL_BLOCKS, ratio_fn=_ratio,
+        free_vram_bytes=free,
+    )
+
+
+def test_inference_pick_zero_when_model_fits():
+    assert _pick(_FP8_BYTES, 24 * _GIB) == 0
+
+
+def test_inference_pick_swaps_on_12gb_card():
+    # 14.1GB ConvRot int8 Krea 2 on a 12GB card: whole load is impossible
+    file_bytes = int(14.1 * _GIB)
+    blocks = _pick(file_bytes, _FREE_VRAM_12G)
+    assert 0 < blocks < _TOTAL_BLOCKS
+    resident = file_bytes * (1.0 - _ratio(blocks))
+    slots = 2 * file_bytes * _ratio(1)
+    assert resident + slots + preflight._INFERENCE_HEADROOM_BYTES <= _FREE_VRAM_12G
+    # minimal: one block fewer would not fit
+    prev = file_bytes * (1.0 - _ratio(blocks - 1)) + (slots if blocks > 1 else 0)
+    assert prev + preflight._INFERENCE_HEADROOM_BYTES > _FREE_VRAM_12G
+
+
+def test_inference_pick_unknown_vram_keeps_old_behavior():
+    assert _pick(_FP8_BYTES, None) == 0
+
+
+def test_inference_pick_hopeless_swaps_everything():
+    assert _pick(_BF16_BYTES, 2 * _GIB) == _TOTAL_BLOCKS
+
+
+def test_inference_headroom_grows_with_image_size():
+    assert preflight.inference_headroom_bytes(None) == preflight._INFERENCE_HEADROOM_BYTES
+    small = preflight.inference_headroom_bytes(512 * 512)
+    square = preflight.inference_headroom_bytes(1024 * 1024)
+    tall = preflight.inference_headroom_bytes(1024 * 1536)
+    assert small == preflight._INFERENCE_HEADROOM_BYTES  # never below the fixed floor
+    assert small <= square < tall
+    # 1024x1536 on Krea2 INT8 OOMed with 3GB beside the weights
+    assert tall >= int(4.5 * _GIB)
+
+
+def test_inference_pick_uses_exact_resident_bytes():
+    # resident bytes from the file header win over the parameter-ratio estimate
+    block = int(0.405 * _GIB)
+    other = int(1.236 * _GIB)
+
+    def resident(blocks: int) -> int:
+        return other + block * (_TOTAL_BLOCKS - blocks) + (2 * block if blocks else 0)
+
+    free = int(11.0 * _GIB)
+    headroom = preflight.inference_headroom_bytes(1024 * 1536)
+    blocks = preflight.pick_inference_blocks(
+        file_bytes=int(12.57 * _GIB), total_blocks=_TOTAL_BLOCKS, ratio_fn=_ratio,
+        free_vram_bytes=free, headroom_bytes=headroom, resident_fn=resident,
+    )
+    assert resident(blocks) + headroom <= free
+    assert resident(blocks - 1) + headroom > free

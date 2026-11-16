@@ -299,8 +299,17 @@ class ImageDataset(Dataset):
                  native_resolution=False, native_token_budget=0,
                  native_over_budget="downscale", native_max_side_tokens=0,
                  native_align=_ANIMA_LATENT.align_px, load_masks=False,
-                 control_dir=None, native_text_tokens=None):
+                 control_dir=None, native_text_tokens=None,
+                 caption_variations=0, caption_keep_tags=1, caption_variation_tag_dropout=0.0,
+                 caption_variation_seed=0):
         self.data_dir = Path(data_dir)
+        # Caption variations (text-cache families): see training/caption_variations.py
+        self.caption_variations = int(caption_variations or 0)
+        self.caption_keep_tags = int(caption_keep_tags or 0)
+        self.caption_variation_tag_dropout = float(caption_variation_tag_dropout or 0.0)
+        self.caption_variation_seed = int(caption_variation_seed or 0)
+        self._caption_variants: dict[str, list[str]] = {}
+        self._caption_visits: dict[str, int] = {}
         # Edit training: each target image has a same-named input image in every
         # control dir (mirrored subfolders, or flat) -- one dir per reference frame,
         # in frame order (diffusion-pipe control_paths / ai-toolkit control_path list).
@@ -856,6 +865,33 @@ class ImageDataset(Dataset):
 
         return "" if caption is None else str(caption)
 
+    def caption_variants_for_sample(self, sample) -> list[str]:
+        """Every caption this sample can train with; one unless caption variations are on."""
+        if self.caption_variations <= 0 or self.caption_override is not None:
+            return [self.caption_for_sample(sample)]
+        key = str(sample["image"])
+        variants = self._caption_variants.get(key)
+        if variants is None:
+            from training.caption_variations import build_variations
+            variants = build_variations(
+                self.caption_for_sample(sample), self.caption_variations,
+                keep_tags=self.caption_keep_tags, tag_dropout=self.caption_variation_tag_dropout,
+                seed=self.caption_variation_seed,
+            )
+            self._caption_variants[key] = variants
+        return variants
+
+    def caption_for_visit(self, sample) -> str:
+        """The caption of one training visit: resolution tiers and epochs of an image walk its variations."""
+        variants = self.caption_variants_for_sample(sample)
+        if len(variants) == 1:
+            return variants[0]
+        from training.caption_variations import variation_slot
+        key = str(sample["image"])
+        visit = self._caption_visits.get(key, 0)
+        self._caption_visits[key] = visit + 1
+        return variants[variation_slot(visit, len(variants), key, self.caption_variation_seed)]
+
     def __getitem__(self, idx):
         # Default path: DataLoader can't pass extra arguments, so flip_augment
         # decides whether to flip randomly. When CachedLatentDataset wants
@@ -879,7 +915,7 @@ class ImageDataset(Dataset):
         img = Image.open(sample["image"]).convert("RGB")
 
         # Get the caption (a regularization set can uniformly override via caption_override)
-        caption = self.caption_for_sample(sample)
+        caption = self.caption_for_visit(sample)
 
         # Target size: ARB bucket (native off) or native floor-16 fixed size
         # (native on). Always goes through _target_size_for; when it returns
@@ -946,7 +982,8 @@ class ImageDataset(Dataset):
         arr = np.array(img).astype(np.float32) / 127.5 - 1.0
         tensor = torch.from_numpy(arr).permute(2, 0, 1)
 
-        item = {"pixel_values": tensor, "caption": caption, "mask": mask_tensor}
+        item = {"pixel_values": tensor, "caption": caption, "mask": mask_tensor,
+                "image": str(sample["image"])}
         if control_tensor is not None:
             item["control_pixel_values"] = control_tensor
         return item
@@ -1724,7 +1761,9 @@ class CachedLatentDataset(Dataset):
 
         # Process the caption (shares the same source of truth as
         # ImageDataset / the text-cache pre-scan)
-        if hasattr(base, "caption_for_sample"):
+        if hasattr(base, "caption_for_visit"):
+            caption = base.caption_for_visit(sample)
+        elif hasattr(base, "caption_for_sample"):
             caption = base.caption_for_sample(sample)
         else:  # a third-party wrapper that isn't ImageDataset: keep the pre-Phase-2 duck-type behavior
             caption = None
@@ -1782,7 +1821,8 @@ def collate_fn(batch):
     """DataLoader collate"""
     pixels = torch.stack([b["pixel_values"] for b in batch])
     captions = [b["caption"] for b in batch]
-    result = {"pixel_values": pixels, "captions": captions}
+    result = {"pixel_values": pixels, "captions": captions,
+              "images": [b.get("image", "") for b in batch]}
     if "control_pixel_values" in batch[0]:
         result["control_pixel_values"] = torch.stack([b["control_pixel_values"] for b in batch])
     masks = _stack_masks(
@@ -1802,7 +1842,8 @@ def collate_fn_cached(batch):
     """DataLoader collate for cached latents"""
     latents = torch.stack([b["latent"] for b in batch])
     captions = [b["caption"] for b in batch]
-    result = {"latents": latents, "captions": captions}
+    result = {"latents": latents, "captions": captions,
+              "images": [b.get("image", "") for b in batch]}
     if "control_latent" in batch[0]:
         result["control_latents"] = torch.stack([b["control_latent"] for b in batch])
     masks = _stack_masks(batch, latents.shape[-2], latents.shape[-1])

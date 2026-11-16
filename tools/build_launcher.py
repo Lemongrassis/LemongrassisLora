@@ -1,7 +1,7 @@
 #!/usr/bin/env python
-"""Compiles `tools/launcher.py` into a single-file executable (AnimaLoraStudio.exe on Windows).
+"""Compiles `tools/launcher.py` into a single-file executable (LemongrassisLora.exe on Windows).
 
-    python tools/build_launcher.py                 -> dist/AnimaLoraStudio(.exe)
+    python tools/build_launcher.py                 -> dist/LemongrassisLora(.exe)
     python tools/build_launcher.py --output-dir X   custom output directory
     python tools/build_launcher.py --console        keep the console window (default anyway)
 
@@ -25,7 +25,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ENTRY = REPO_ROOT / "tools" / "launcher.py"
-NAME = "AnimaLoraStudio"
+NAME = "LemongrassisLora"
 
 
 def ensure_pyinstaller() -> None:

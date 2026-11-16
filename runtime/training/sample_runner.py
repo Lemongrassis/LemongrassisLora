@@ -13,8 +13,9 @@ Public:
 from __future__ import annotations
 
 import logging
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 import torch
 
@@ -53,6 +54,32 @@ def _edit_references(ctx: TrainingContext) -> list:
     return out
 
 
+@contextmanager
+def preview_base_scope(ctx: TrainingContext) -> Iterator[bool]:
+    """Keep the preview base (Krea2 Turbo, MOSS Turbo LoRA) swapped in for the body.
+
+    Yields False when it can't be swapped in (the training weights are intact;
+    previews are skipped rather than drawn on the training base with Turbo
+    settings). Without a preview base, or nested inside another scope, it's a
+    no-op yielding True. Restoring the training weights happens on exit; if
+    that fails the error propagates and stops training.
+    """
+    base = getattr(ctx, "preview_base", None)
+    if base is None or base.active:
+        yield True
+        return
+    with ExitStack() as stack:
+        try:
+            stack.enter_context(base.swapped())
+        except base.Unavailable as exc:
+            logger.warning("Preview base %s could not be loaded, preview skipped: %s",
+                           base.preview_path.name, exc)
+            ctx.emit(f"Preview skipped: {base.preview_path.name} could not be loaded")
+            yield False
+            return
+        yield True
+
+
 def run_sample(
     ctx: TrainingContext,
     *,
@@ -70,10 +97,29 @@ def run_sample(
     - wandb: log_image is called if wandb_key is given; caption / step are passed along too
     - monitor_state.json: always tries to push sample_path to the frontend preview
     - seed_offset: in baseline mode, offset by i so multiple test prompts produce different images
+    - preview base (Krea2 Turbo, MOSS Turbo LoRA): swapped in around the sample, with its own steps / guidance
 
     sample_path must be decided by the caller (baseline numbering / step /
     epoch is not this function's concern).
     """
+    with preview_base_scope(ctx) as ready:
+        if ready:
+            _draw_sample(
+                ctx, prompt=prompt, sample_path=sample_path, wandb_key=wandb_key,
+                wandb_caption=wandb_caption, wandb_step=wandb_step, seed_offset=seed_offset,
+            )
+
+
+def _draw_sample(
+    ctx: TrainingContext,
+    *,
+    prompt: str,
+    sample_path: Path,
+    wandb_key: Optional[str],
+    wandb_caption: Optional[str],
+    wandb_step: Optional[int],
+    seed_offset: int,
+) -> None:
     args = ctx.args
     # resolution may be a list (multi-resolution); the sample preview uses the first (base) resolution.
     _res = args.resolution
@@ -108,6 +154,13 @@ def run_sample(
         getattr(args, "sample_scheduler", spec.sampling.default_scheduler)
         or spec.sampling.default_scheduler
     )
+    sample_kwargs = {"sampler_name": s_sampler, "scheduler": s_sched}
+    # Turbo previews: the steps / guidance they are distilled for, plus what the base fixes
+    preview_base = getattr(ctx, "preview_base", None)
+    if preview_base is not None:
+        s_steps = int(getattr(args, "sample_turbo_steps", 8) or 8)
+        s_cfg = float(getattr(args, "sample_turbo_cfg", 1.0) or 1.0)
+        sample_kwargs.update(preview_base.sample_kwargs)
 
     # T-LoRA: matches ControlGenAI/T-LoRA's official inference -- the sample
     # stage should not apply the timestep mask. The official inferencer
@@ -136,6 +189,10 @@ def run_sample(
     _log_vram_watermark("before sampling", peak_label="training step")
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    preview_strength = float(getattr(args, "moss_sample_lora_strength", 1.0))
+    set_strength = getattr(ctx.injector, "set_multiplier", None) if preview_strength != 1.0 else None
+    if set_strength is not None:
+        set_strength(preview_strength)
     try:
         with optimizer_eval_mode(ctx.optimizer):
             ctx.model.eval()
@@ -145,11 +202,10 @@ def run_sample(
                 ctx.model, ctx.vae, ctx.text_stack,
                 prompt, height=s_h, width=s_w, steps=s_steps, cfg_scale=s_cfg,
                 negative_prompt=s_neg,
-                sampler_name=s_sampler,
-                scheduler=s_sched,
                 device=ctx.device, dtype=ctx.dtype,
                 seed=(s_seed + seed_offset) if s_seed else None,
                 **({"reference_images": references} if references else {}),
+                **sample_kwargs,
             )
             img.save(sample_path)
             ctx.emit(f"Sample saved: {sample_path.name}")
@@ -169,6 +225,8 @@ def run_sample(
     except Exception as exc:
         logger.warning("Sampling failed, skipped this preview, training not interrupted: %s", exc, exc_info=True)
     finally:
+        if set_strength is not None:
+            set_strength(1.0)
         if was_training:
             ctx.model.train()
         else:

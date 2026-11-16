@@ -19,6 +19,7 @@ import torch
 import torch.nn.functional as F
 
 from training.anti_fade import anti_fade_loss
+from training.tone_anchor import remove_error_mean
 from training.context import TrainingContext
 from training.loss_weighting import compute_loss_weight
 from training.noise import make_noise, noise_params_from_args
@@ -37,6 +38,35 @@ from utils.optimizer_utils import get_optimizer_monitor_metrics, optimizer_eval_
 
 
 logger = logging.getLogger(__name__)
+
+
+def _periodic_samples(ctx, tag: str, label: str, wandb_key: str) -> None:
+    """One periodic preview: the next prompt in rotation, saved as ``{tag}.png``.
+
+    Edit training previews redo fixed examples (input image + its text); one of
+    them per sample would show each example only every third time, so all of
+    them are drawn every time, as ``{tag}_{i}.png``.
+    """
+    if bool(getattr(ctx.args, "edit_mode", False)) and ctx.sample_refs:
+        jobs = []
+        for index, (prompt, refs) in enumerate(zip(ctx.sample_prompts, ctx.sample_refs)):
+            jobs.append((prompt, refs, ctx.sample_dir / f"{tag}_{index}.png", index))
+    else:
+        prompt = ctx.get_next_sample_prompt()
+        jobs = [(prompt, ctx.current_sample_refs, ctx.sample_dir / f"{tag}.png", 0)]
+    for prompt, refs, path, index in jobs:
+        ctx.current_sample_refs = refs
+        prompt_short = prompt[:50] + "..." if len(prompt) > 50 else prompt
+        ctx.emit(f"Sampling ({label}): {prompt_short}")
+        run_sample(
+            ctx,
+            prompt=prompt,
+            sample_path=path,
+            wandb_key=wandb_key,
+            wandb_caption=f"{label}: {prompt}",
+            wandb_step=ctx.global_step,
+            seed_offset=index,
+        )
 
 
 def _save_adapter(ctx, path) -> None:
@@ -349,11 +379,18 @@ def run(ctx: TrainingContext) -> None:
             )
 
     bucket_switch = _BucketSwitchCacheRelease(ctx.device)
+    # Mid-epoch refresh of the automatic recovery point (0 = only at epoch ends):
+    # pause and crash restarts resume from the freshest one, mid-epoch points
+    # carry their batch offset so nothing is trained twice.
+    auto_state_every_s = max(0.0, float(getattr(args, "auto_state_every_minutes", 0) or 0)) * 60.0
+    last_auto_state_at = time.monotonic()
 
     for epoch in range(ctx.start_epoch, args.epochs):
         ctx.current_epoch = epoch
         epoch_loss_sum = 0.0
         epoch_step_count = 0
+        epoch_raw_sum = 0.0   # unweighted MSE of the main-set samples (adaptive LR)
+        epoch_raw_count = 0
         if ctx.use_cached and hasattr(ctx.dataloader, "batch_sampler") and hasattr(ctx.dataloader.batch_sampler, "set_epoch"):
             ctx.dataloader.batch_sampler.set_epoch(epoch)
             # After the NaViT packer reshuffles each epoch, the pack count
@@ -537,6 +574,18 @@ def run(ctx: TrainingContext) -> None:
                 # here in the loop only for leap (Anima-only gated code)
                 if use_leap_this_step:
                     pad_mask = torch.zeros(bs, 1, latents.shape[-2], latents.shape[-1], device=ctx.device, dtype=ctx.dtype)
+            # Per-image LR: each image's multiplier joins the batch's loss_weight, which every
+            # loss path already applies per sample. Regularization images keep reg_weight only.
+            if ctx.loss_watch is not None and ctx.loss_watch.apply_lr and batch.get("images"):
+                _is_reg = batch["is_reg"].tolist() if "is_reg" in batch else [False] * len(batch["images"])
+                _mult = torch.tensor(
+                    [1.0 if r else ctx.loss_watch.multiplier(k) for k, r in zip(batch["images"], _is_reg)],
+                    dtype=torch.float32,
+                )
+                if bool((_mult != 1.0).any()):
+                    batch["loss_weight"] = (
+                        batch["loss_weight"].to(torch.float32) * _mult if "loss_weight" in batch else _mult
+                    )
             denoise_loss_log = None
             dop_loss_log = None
             sra_align_loss_log = None
@@ -667,7 +716,17 @@ def run(ctx: TrainingContext) -> None:
                         _m = batch["masks"].to(ctx.device, dtype=torch.float32)
                         spatial_mask = _m.view(bs, 1, 1, *_m.shape[-2:])
                     # Training loss is dispatched through the losses/ plugin registry (mse / huber / ...)
-                    loss_per_sample = ctx.loss_fn.compute(pred.float(), target.float(), t)
+                    # Tone anchor: high-noise samples give no gradient on the per-channel mean
+                    # (standard path only; the sampler record and anti-fade keep the raw pred)
+                    loss_pred = pred
+                    if bool(getattr(args, "tone_anchor", False)):
+                        loss_pred = remove_error_mean(
+                            pred, target, t,
+                            min_t=float(getattr(args, "tone_anchor_min_t", 0.6)),
+                            strength=float(getattr(args, "tone_anchor_strength", 1.0)),
+                            spatial_mask=spatial_mask,
+                        )
+                    loss_per_sample = ctx.loss_fn.compute(loss_pred.float(), target.float(), t)
                     # The adaptive sampler (e.g. InfoNoise) records the raw
                     # per-sample MSE (unaffected by huber/loss_weighting
                     # etc. post-processing); decoupled from the training
@@ -701,6 +760,19 @@ def run(ctx: TrainingContext) -> None:
                             ctx.timestep_sampler.record(t.detach()[_main_mask], _raw_mse[_main_mask])
                     else:
                         ctx.timestep_sampler.record(t.detach(), _raw_mse)
+                    # Loss watch / adaptive LR: raw per-sample MSE of the main set
+                    if ctx.loss_watch is not None or ctx.adaptive_lr is not None:
+                        _mse_list = _raw_mse.detach().float().cpu().tolist()
+                        _t_list = t.detach().float().cpu().tolist()
+                        _is_reg = batch["is_reg"].tolist() if "is_reg" in batch else [False] * len(_mse_list)
+                        _keys = batch.get("images") or []
+                        for _i, (_m, _r) in enumerate(zip(_mse_list, _is_reg)):
+                            if _r or _m != _m:
+                                continue
+                            epoch_raw_sum += _m
+                            epoch_raw_count += 1
+                            if ctx.loss_watch is not None and _i < len(_keys) and _keys[_i]:
+                                ctx.loss_watch.observe(_keys[_i], epoch + 1, _t_list[_i], _m)
                     # Weight by sample (a regularization set can lower its weight)
                     if "loss_weight" in batch:
                         w = batch["loss_weight"].to(ctx.device).view(-1, *([1] * (loss_per_sample.dim() - 1)))
@@ -963,17 +1035,7 @@ def run(ctx: TrainingContext) -> None:
 
                 # Sample by step (rotating prompts)
                 if args.sample_steps > 0 and ctx.global_step % args.sample_steps == 0:
-                    prompt = ctx.get_next_sample_prompt()
-                    prompt_short = prompt[:50] + "..." if len(prompt) > 50 else prompt
-                    ctx.emit(f"Sampling (step {ctx.global_step}): {prompt_short}")
-                    run_sample(
-                        ctx,
-                        prompt=prompt,
-                        sample_path=ctx.sample_dir / f"step_{ctx.global_step}.png",
-                        wandb_key="samples/step",
-                        wandb_caption=f"step {ctx.global_step}: {prompt}",
-                        wandb_step=ctx.global_step,
-                    )
+                    _periodic_samples(ctx, f"step_{ctx.global_step}", f"step {ctx.global_step}", "samples/step")
 
                 # Periodically save LoRA weights (by step)
                 save_every_steps = getattr(args, "save_every_steps", 0)
@@ -1007,6 +1069,7 @@ def run(ctx: TrainingContext) -> None:
                             scaler=ctx.scaler,
                             model_family=ctx.family.spec.family_id,
                             ema=ctx.ema,
+                            extras=_extra_state(ctx),
                             epoch_batch_offset=batch_idx + 1,
                         )
                         # Also save LoRA weights
@@ -1015,12 +1078,35 @@ def run(ctx: TrainingContext) -> None:
                     ctx.emit(f"Saved training state (step {ctx.global_step}): {state_path.name}")
                     ctx.wandb_monitor.upload_state_manual(state_path)
 
+                # Time-based mid-epoch refresh of the automatic recovery point
+                if (
+                    auto_state_every_s > 0
+                    and time.monotonic() - last_auto_state_at >= auto_state_every_s
+                    and not (args.max_steps and ctx.global_step >= args.max_steps)
+                ):
+                    _write_auto_state(ctx, args, epoch, batch_idx + 1)
+                    last_auto_state_at = time.monotonic()
+
                 # Check max_steps
                 if args.max_steps and ctx.global_step >= args.max_steps:
                     break
 
         # Actions performed after an epoch ends
         ctx.current_epoch = epoch + 1
+        # Epoch-end helpers. Skipped when max_steps cut the epoch short (the run is over).
+        if not args.max_steps or ctx.global_step < args.max_steps:
+            if ctx.loss_watch is not None:
+                try:
+                    ctx.loss_watch.epoch_boundary(ctx.current_epoch)
+                except Exception as e:  # noqa: BLE001 -- an observer must never stop the run
+                    logger.warning(f"[loss-watch] epoch boundary failed (skipped): {e}")
+            if ctx.adaptive_lr is not None and (epoch_raw_count or epoch_step_count):
+                _epoch_loss = (
+                    epoch_raw_sum / epoch_raw_count if epoch_raw_count
+                    else epoch_loss_sum / epoch_step_count
+                )
+                ctx.emit(ctx.adaptive_lr.epoch_boundary(
+                    epoch, _epoch_loss, ctx.trainable_params, ctx.optimizer))
         if epoch_step_count > 0:
             ctx.wandb_monitor.log(
                 {
@@ -1041,17 +1127,7 @@ def run(ctx: TrainingContext) -> None:
 
             # Sample (rotating prompts)
             if args.sample_every > 0 and ctx.current_epoch % args.sample_every == 0:
-                prompt = ctx.get_next_sample_prompt()
-                prompt_short = prompt[:50] + "..." if len(prompt) > 50 else prompt
-                ctx.emit(f"Sampling (epoch {ctx.current_epoch}): {prompt_short}")
-                run_sample(
-                    ctx,
-                    prompt=prompt,
-                    sample_path=ctx.sample_dir / f"epoch_{ctx.current_epoch}.png",
-                    wandb_key="samples/epoch",
-                    wandb_caption=f"epoch {ctx.current_epoch}: {prompt}",
-                    wandb_step=ctx.global_step,
-                )
+                _periodic_samples(ctx, f"epoch_{ctx.current_epoch}", f"epoch {ctx.current_epoch}", "samples/epoch")
 
             # Periodically save training state (epoch version)
             # ADR 0006 Addendum 1: while touching the epoch field, also fix
@@ -1078,6 +1154,7 @@ def run(ctx: TrainingContext) -> None:
                         scaler=ctx.scaler,
                         model_family=ctx.family.spec.family_id,
                         ema=ctx.ema,
+                        extras=_extra_state(ctx),
                     )
                     lora_path = ctx.output_dir / f"{args.output_name}_epoch{ctx.current_epoch}.safetensors"
                     if not lora_path.exists():
@@ -1096,43 +1173,74 @@ def run(ctx: TrainingContext) -> None:
             # Addendum 2: writes to auto_state_dir() (the task's own
             # archive, tasks/<id>/state/; CLI falls back to state_dir()) --
             # the user's periodic save still goes through state_dir() above, unchanged.
-            auto_state_path = build_auto_epoch_state_path(ctx.auto_state_dir())
-            auto_config_path = build_auto_epoch_config_path(ctx.auto_state_dir())
-            monitor_data = None
-            if ctx.monitor_server:
-                try:
-                    from train_monitor import get_state
-                    monitor_data = get_state()
-                except Exception:
-                    pass
-            # Write the config snapshot first -- small and low failure probability
-            write_config_snapshot(auto_config_path, args, ctx.sample_prompts)
-            with optimizer_eval_mode(ctx.optimizer):
-                save_training_state(
-                    auto_state_path, ctx.injector, ctx.optimizer,
-                    ctx.current_epoch, ctx.global_step, ctx.loss_history,
-                    monitor_state=monitor_data, scheduler=ctx.scheduler,
-                    timestep_sampler=ctx.timestep_sampler,
-                    sra_aligner=ctx.sra_aligner,
-                    scaler=ctx.scaler,
-                    model_family=ctx.family.spec.family_id,
-                    ema=ctx.ema,
-                )
-            ctx.wandb_monitor.upload_state_auto(auto_state_path)
-            # Update ctx fields for handle_interrupt to use when emitting pause_state
-            ctx.last_auto_epoch_state_path = auto_state_path
-            ctx.last_auto_epoch_config_path = auto_config_path
-            # The supervisor's `_on_line` catches this event -> marks
-            # slot.last_auto_epoch_state_path -> the is_pausable upgrade
-            # condition is met -> SSE unlocks the UI pause button (ADR
-            # Addendum 1 SSUI)
-            emit_event("auto_epoch_backup_written", {
-                "state_path": str(auto_state_path),
-                "config_path": str(auto_config_path),
-                "epoch": ctx.current_epoch,
-                "step": ctx.global_step,
-            })
+            _write_auto_state(ctx, args, ctx.current_epoch, 0)
+            last_auto_state_at = time.monotonic()
 
         # Check max_steps
         if args.max_steps and ctx.global_step >= args.max_steps:
             break
+
+
+def _extra_state(ctx) -> dict:
+    """States of the optional helpers that ride along in the training state."""
+    out = {}
+    for name in ("loss_watch", "adaptive_lr"):
+        obj = getattr(ctx, name, None)
+        if obj is not None:
+            out[name] = obj.state_dict()
+    return out
+
+
+def _write_auto_state(ctx, args, epoch: int, batch_offset: int) -> None:
+    """Overwrite auto_epoch_state.pt (+ its config snapshot) and tell the supervisor.
+
+    ADR 0006 Addendum 1: the system-level recovery point, independent of the
+    user's save_state_every_* archives (no args gate at epoch ends). Written to
+    auto_state_dir() (the task's own archive, tasks/<id>/state/; CLI falls back
+    to state_dir()). Pause resumes from it, and so do crash restarts and the
+    manual resume of a failed task.
+
+    ``epoch`` / ``batch_offset``: at an epoch end the epoch has already been
+    advanced and the offset is 0; a mid-epoch refresh passes the running epoch
+    and batch_idx + 1, so resuming skips the batches already trained (#625).
+    """
+    auto_state_path = build_auto_epoch_state_path(ctx.auto_state_dir())
+    auto_config_path = build_auto_epoch_config_path(ctx.auto_state_dir())
+    monitor_data = None
+    if ctx.monitor_server:
+        try:
+            from train_monitor import get_state
+            monitor_data = get_state()
+        except Exception:
+            pass
+    # Write the config snapshot first -- small and low failure probability
+    write_config_snapshot(auto_config_path, args, ctx.sample_prompts)
+    with optimizer_eval_mode(ctx.optimizer):
+        save_training_state(
+            auto_state_path, ctx.injector, ctx.optimizer,
+            epoch, ctx.global_step, ctx.loss_history,
+            monitor_state=monitor_data, scheduler=ctx.scheduler,
+            timestep_sampler=ctx.timestep_sampler,
+            sra_aligner=ctx.sra_aligner,
+            scaler=ctx.scaler,
+            model_family=ctx.family.spec.family_id,
+            ema=ctx.ema,
+            extras=_extra_state(ctx),
+            epoch_batch_offset=batch_offset,
+        )
+    ctx.wandb_monitor.upload_state_auto(auto_state_path)
+    # Update ctx fields for handle_interrupt to use when emitting pause_state
+    ctx.last_auto_epoch_state_path = auto_state_path
+    ctx.last_auto_epoch_config_path = auto_config_path
+    if batch_offset:
+        ctx.emit(f"Refreshed the recovery point (step {ctx.global_step})")
+    # The supervisor's `_on_line` catches this event -> marks
+    # slot.last_auto_epoch_state_path -> the is_pausable upgrade condition is
+    # met -> SSE unlocks the UI pause button (ADR Addendum 1); it also
+    # persists the path as the task's resume point (Addendum 2).
+    emit_event("auto_epoch_backup_written", {
+        "state_path": str(auto_state_path),
+        "config_path": str(auto_config_path),
+        "epoch": epoch,
+        "step": ctx.global_step,
+    })

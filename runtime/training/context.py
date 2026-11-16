@@ -76,6 +76,10 @@ class TrainingContext:
     # PR-2b D15, replaces the original three separate qwen_model/qwen_tok/t5_tok fields
     text_stack: Any = None
     injector: Any = None
+    # Previews on another base (Krea2 Turbo while training on Raw): weights are
+    # swapped in for each preview and swapped back after; None = previews use
+    # the training base
+    preview_base: Any = None
 
     # --- filled by dataset_phase ---
     bucket_mgr: Any = None
@@ -107,6 +111,8 @@ class TrainingContext:
     sra_aligner: Any = None         # training.families.anima.sra_align.SRAAligner (optional)
     block_swap: Any = None          # training.block_swap.PinnedBlockSwap (optional)
     ema: Any = None                 # training.ema.AdapterEma (optional)
+    loss_watch: Any = None          # training.loss_watch.PerImageLossWatch (optional)
+    adaptive_lr: Any = None         # training.adaptive_lr.AdaptiveLR (optional)
 
     # --- filled by resume_phase ---
     global_step: int = 0

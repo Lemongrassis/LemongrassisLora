@@ -38,6 +38,9 @@ TIME_MODULATION_MODULES = ("shared_block_modulation",)
 IMAGE_TOKENS_ONLY_KEY = "moss_image_tokens_only"
 _BLOCK_LORA_PREFIX = "lora_unet_layers_"
 BLOCK_NORM_NAMES = ["layers.*.norm1", "layers.*.norm2"]
+#: moss_late_blocks_only: fnmatch patterns for blocks 0-19 (the LoRA stays on blocks 20-41)
+EARLY_BLOCK_EXCLUDES = ["layers.?.*", "layers.1?.*"]
+LATE_BLOCK_NORM_NAMES = [f"layers.{tens}?.{norm}" for tens in (2, 3, 4) for norm in ("norm1", "norm2")]
 _BLOCK_NORM_KEY_RE = re.compile(r"^lora_unet_layers_\d+_norm[12]\.diff$")
 BLOCK_MOD_PREFIX = "moss_block_mod."
 
@@ -57,10 +60,17 @@ def adapt_preset(preset: dict[str, Any], args: Any) -> dict[str, Any]:
     if _get(args, "moss_time_modulation", False):
         names += [n for n in TIME_MODULATION_MODULES if n not in names]
     preset["target_name"] = names
-    if _get(args, IMAGE_TOKENS_ONLY_KEY, False):
+    if _get(args, IMAGE_TOKENS_ONLY_KEY, False) or _get(args, "moss_exclude_text_refiner", False):
         preset["target_module"] = [m for m in preset.get("target_module", []) if m != "MossImageTextBlock"]
+    late_only = _get(args, "moss_late_blocks_only", False)
+    if late_only:
+        preset["target_module"] = [m for m in preset.get("target_module", []) if m != "MossImageTextBlock"]
+        preset["exclude_name"] = list(preset.get("exclude_name", [])) + EARLY_BLOCK_EXCLUDES
+    if _get(args, "moss_exclude_block_22", False):
+        # Block 22 is the one skipped in the negative CFG branch (ai-toolkit leaves it out by default)
+        preset["exclude_name"] = list(preset.get("exclude_name", [])) + ["layers.22.*"]
     if _get(args, "moss_block_norms", False):
-        preset["train_norm_names"] = list(BLOCK_NORM_NAMES)
+        preset["train_norm_names"] = list(LATE_BLOCK_NORM_NAMES if late_only else BLOCK_NORM_NAMES)
     return preset
 
 
@@ -131,6 +141,57 @@ def install_image_token_mask(model: torch.nn.Module, network: Any) -> int:
         patched += 1
     logger.info("MOSS image-tokens-only LoRA: masked text positions in %d block layers", patched)
     return patched
+
+
+def init_down_from_weight_svd(network: Any) -> int:
+    """Start every lora_down row on one of the base layer's top right singular vectors.
+
+    With the usual random init the LoRA reads random directions of the input; these are the
+    directions the layer actually responds to. Row norms stay as initialised, so the LR means
+    the same, and lora_up is still zero, so the model is unchanged at step 0.
+    """
+    from training.families.quant_int8 import dequantize
+
+    done = 0
+    # svd_lowrank draws random numbers: keep the training RNG stream as it was
+    with torch.no_grad(), torch.random.fork_rng():
+        torch.manual_seed(0)
+        for lora in getattr(network, "loras", []) or []:
+            down = getattr(lora, "lora_down", None)
+            base = (getattr(lora, "org_module", None) or [None])[0]
+            if down is None or not isinstance(base, nn.Linear):
+                continue
+            weight = base.weight
+            if weight.dtype == torch.int8:
+                w = dequantize(weight, base.scale_weight, base._convrot_groupsize)
+            else:
+                w = weight.float()
+            rank = min(down.weight.shape[0], *w.shape)
+            _, _, v = torch.svd_lowrank(w, q=min(rank + 8, *w.shape), niter=2)
+            rows = v[:, :rank].T.to(down.weight)
+            norms = down.weight[:rank].norm(dim=1, keepdim=True)
+            down.weight[:rank].copy_(rows * norms)
+            done += 1
+    logger.info("MOSS weight_svd init: %d LoRA layers start on the base layer's singular vectors", done)
+    return done
+
+
+def init_down_gaussian(network: Any) -> int:
+    """Start every lora_down from a normal distribution with std 1 / rank (PEFT's "gaussian" init).
+
+    That is about 12 times the usual kaiming-uniform scale, so with the same lora_up the LoRA acts
+    about 12 times stronger. lora_up is still zero, so the model is unchanged at step 0.
+    """
+    done = 0
+    with torch.no_grad():
+        for lora in getattr(network, "loras", []) or []:
+            down = getattr(lora, "lora_down", None)
+            if down is None or down.weight.ndim != 2:
+                continue
+            nn.init.normal_(down.weight, std=1.0 / down.weight.shape[0])
+            done += 1
+    logger.info("MOSS gaussian init: %d LoRA layers start with lora_down std = 1 / rank", done)
+    return done
 
 
 class BlockModulation:

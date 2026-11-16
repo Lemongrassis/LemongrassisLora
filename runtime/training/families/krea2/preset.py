@@ -26,3 +26,23 @@ KREA2_PRESET: dict[str, Any] = {
     "module_algo_map": {},
     "name_algo_map": {},
 }
+
+# Training switches -> module-name patterns left out of the adapter. Names are
+# SingleStreamDiT paths; "blocks.*.mlp.*" hits only the 28 DiT blocks, the
+# text-fusion MLPs belong to the text group.
+LAYER_EXCLUSIONS: dict[str, tuple[str, ...]] = {
+    "krea2_exclude_io": ("first", "last.linear"),
+    "krea2_exclude_time": ("tmlp.*", "tproj.*"),
+    "krea2_exclude_text": ("txtfusion.*", "txtmlp.*"),
+    "krea2_exclude_mlp": ("blocks.*.mlp.*",),
+}
+
+
+def preset_for_args(preset: dict[str, Any], args: Any) -> dict[str, Any]:
+    """Return a copy of the preset with the layer groups switched off in ``args`` excluded."""
+    get = args.get if isinstance(args, dict) else lambda key, default: getattr(args, key, default)
+    excluded = list(preset.get("exclude_name", []))
+    for key, patterns in LAYER_EXCLUSIONS.items():
+        if get(key, False):
+            excluded += [p for p in patterns if p not in excluded]
+    return {**preset, "exclude_name": excluded}

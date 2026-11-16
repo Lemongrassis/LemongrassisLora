@@ -114,6 +114,7 @@ export const SCHEMA_GROUP_LABEL_KEYS: Record<string, string> = {
   monitor: 'schema.groups.monitor',
   experimental: 'schema.groups.experimental',
   experimental_blocks: 'schema.groups.experimentalBlocks',
+  krea2_layers: 'schema.groups.krea2Layers',
 }
 
 export const SCHEMA_ENUM_LABEL_KEYS: Record<string, Record<string, string>> = {
@@ -129,6 +130,14 @@ export const SCHEMA_ENUM_LABEL_KEYS: Record<string, Record<string, string>> = {
     tlora: 'schema.enums.loraType.tlora',
     riemann: 'schema.enums.loraType.riemann',
   },
+  lora_dora_axis: {
+    output: 'schema.enums.loraDoraAxis.output',
+    input: 'schema.enums.loraDoraAxis.input',
+  },
+  lora_dora_compute: {
+    lycoris: 'schema.enums.loraDoraCompute.lycoris',
+    comfyui_bf16: 'schema.enums.loraDoraCompute.comfyuiBf16',
+  },
   lr_scheduler: {
     none: 'schema.enums.lrScheduler.none',
     cosine: 'schema.enums.lrScheduler.cosine',
@@ -140,6 +149,7 @@ export const SCHEMA_ENUM_LABEL_KEYS: Record<string, Record<string, string>> = {
     rex: 'schema.enums.lrScheduler.rex',
     rex_annealing_warm_restarts: 'schema.enums.lrScheduler.rexAnnealingWarmRestarts',
     licatron: 'schema.enums.lrScheduler.licatron',
+    rerex: 'schema.enums.lrScheduler.rerex',
   },
   optimizer_type: {
     adamw: 'schema.enums.optimizerType.adamw',
@@ -152,6 +162,7 @@ export const SCHEMA_ENUM_LABEL_KEYS: Record<string, Record<string, string>> = {
     prodigy: 'schema.enums.optimizerType.prodigy',
     prodigy_plus_schedulefree: 'schema.enums.optimizerType.prodigyPlusSchedulefree',
     simplified_ademamix: 'schema.enums.optimizerType.simplifiedAdemamix',
+    sinkgd: 'schema.enums.optimizerType.sinkgd',
   },
   muon_adjust_lr: {
     match_rms_adamw: 'schema.enums.muonAdjustLr.matchRmsAdamw',
@@ -167,6 +178,14 @@ export const SCHEMA_ENUM_LABEL_KEYS: Record<string, Record<string, string>> = {
     convrot_int8: 'schema.enums.text_encoder_quantization.convrot_int8',
     qfloat8: 'schema.enums.text_encoder_quantization.qfloat8',
   },
+  int8_train_matmul: {
+    w8a8: 'schema.enums.int8_train_matmul.w8a8',
+    w8a16: 'schema.enums.int8_train_matmul.w8a16',
+  },
+  sample_base: {
+    train: 'schema.enums.sample_base.train',
+    turbo: 'schema.enums.sample_base.turbo',
+  },
   timestep_sampling: {
     logit_normal: 'schema.enums.timestepSampling.logitNormal',
     uniform: 'schema.enums.timestepSampling.uniform',
@@ -180,6 +199,7 @@ export const SCHEMA_ENUM_LABEL_KEYS: Record<string, Record<string, string>> = {
     min_snr: 'schema.enums.lossWeighting.minSnr',
     detail_inv_t: 'schema.enums.lossWeighting.detailInvT',
     cosmap: 'schema.enums.lossWeighting.cosmap',
+    bsmntw: 'schema.enums.lossWeighting.bsmntw',
   },
   leap_variant: {
     original: 'schema.enums.leapVariant.original',
@@ -205,6 +225,8 @@ export const SCHEMA_ENUM_LABEL_KEYS: Record<string, Record<string, string>> = {
   sample_sampler_name: {
     er_sde: 'schema.enums.sampler.erSde',
     dpmpp_3m_sde: 'schema.enums.sampler.dpmpp3mSde',
+    dpmpp_sde: 'schema.enums.sampler.dpmppSde',
+    dpmpp_sde_gpu: 'schema.enums.sampler.dpmppSdeGpu',
     euler: 'schema.enums.sampler.euler',
   },
   sample_scheduler: {

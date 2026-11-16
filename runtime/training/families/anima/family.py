@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from training.families.anima import ANIMA_SPEC
-from training.families.anima.preset import ANIMA_PRESET
+from training.families.anima.preset import ANIMA_PRESET, anima_preset
 
 
 class AnimaFamily:
@@ -219,6 +219,14 @@ class AnimaFamily:
     # -- LoRA output --------------------------------------------------------
     def lora_preset(self) -> dict[str, Any]:
         return ANIMA_PRESET
+
+    def lora_preset_for_args(self, args) -> dict[str, Any]:
+        """Training: adds the adaLN modulation targets when lora_train_adaln is on."""
+        return anima_preset(train_adaln=bool(getattr(args, "lora_train_adaln", False)))
+
+    def lora_preset_for_state_dict(self, keys) -> dict[str, Any]:
+        """Inference: a file with adaLN modulation weights needs those targets too."""
+        return anima_preset(train_adaln=any("adaln_modulation_" in key for key in keys))
 
     def lora_metadata(self) -> dict[str, str]:
         return {

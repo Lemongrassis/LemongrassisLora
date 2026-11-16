@@ -21,7 +21,7 @@ export type GenerateFamily = 'anima' | 'krea2' | 'moss_image'
 export const SAMPLER_OPTIONS_BY_FAMILY = {
   anima: ['er_sde', 'dpmpp_3m_sde'],
   krea2: ['euler', 'er_sde'],
-  moss_image: ['euler'],
+  moss_image: ['euler', 'dpmpp_sde', 'dpmpp_sde_gpu'],
 } as const satisfies Record<GenerateFamily, readonly string[]>
 
 export const SCHEDULER_OPTIONS_BY_FAMILY = {
@@ -32,13 +32,14 @@ export const SCHEDULER_OPTIONS_BY_FAMILY = {
 
 export const FAMILY_GENERATE_DEFAULTS = {
   anima: { steps: 25, cfgScale: 4.0 },
-  krea2: { steps: 28, cfgScale: 4.5 },
+  // Krea 2 takes ComfyUI's cfg (its own guidance 4.5 = cfg 5.5)
+  krea2: { steps: 28, cfgScale: 5.5 },
   moss_image: { steps: 50, cfgScale: 3.0 },
 } as const satisfies Record<GenerateFamily, { steps: number; cfgScale: number }>
 
-export const DISTILLED_GENERATE_DEFAULTS = { steps: 8, cfgScale: 0.0 } as const
+export const DISTILLED_GENERATE_DEFAULTS = { steps: 8, cfgScale: 1.0 } as const
 
-export const SAMPLER_OPTIONS = ['er_sde', 'dpmpp_3m_sde', 'euler'] as const
+export const SAMPLER_OPTIONS = ['er_sde', 'dpmpp_3m_sde', 'euler', 'dpmpp_sde', 'dpmpp_sde_gpu'] as const
 export type SamplerName = (typeof SAMPLER_OPTIONS)[number]
 export const DEFAULT_SAMPLER: SamplerName = 'er_sde'
 

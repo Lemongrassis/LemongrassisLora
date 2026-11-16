@@ -108,6 +108,11 @@ def _load_dit(ctx: TrainingContext) -> None:
         repo_root=ctx.repo_root,
         **extra,
     )
+    # Previews on another base (Krea2 Turbo): checked here so a wrong file
+    # fails at startup, not at the first preview
+    make_preview_base = getattr(ctx.family, "preview_base", None)
+    if callable(make_preview_base):
+        ctx.preview_base = make_preview_base(args, ctx.model)
     # Return large-weight mmap cache pages to the system (13-26GB; a real hang-on-paging
     # case observed in the field, and training benefits from it too).
     from training.sysmem import trim_working_set
@@ -182,6 +187,28 @@ def _setup_block_swap(ctx: TrainingContext) -> None:
     log_vram("after block swap attach", ctx.device)
 
 
+def _setup_partial_checkpoint(ctx: TrainingContext) -> None:
+    """Partial gradient checkpointing (Anima): the leading DiT blocks skip the recompute.
+
+    Runs after block swap so the swapped-out trailing blocks are known: they
+    always stay checkpointed (see partial_checkpoint_blocks). Low VRAM keeps
+    every block checkpointed.
+    """
+    args = ctx.args
+    if not (getattr(args, "grad_checkpoint", False) and getattr(args, "grad_checkpoint_partial", False)):
+        return
+    if getattr(args, "low_vram", False) or ctx.family.spec.family_id != "anima":
+        return
+    from training.families.anima.forward import partial_checkpoint_blocks
+
+    total = len(ctx.model.blocks)
+    swapped = ctx.block_swap.num_swap if ctx.block_swap is not None else 0
+    skip = partial_checkpoint_blocks(total, getattr(args, "grad_checkpoint_skip_pct", 0), swapped)
+    ctx.model.checkpoint_skip_blocks = skip
+    logger.info("partial checkpointing: %d of %d blocks without checkpointing (%d swapped to RAM)",
+                skip, total, swapped)
+
+
 def _inject_adapter(ctx: TrainingContext) -> None:
     args = ctx.args
     logger.info("Injecting %s...", args.lora_type.upper())
@@ -207,9 +234,19 @@ def _inject_adapter(ctx: TrainingContext) -> None:
     ctx.injector.metadata_extra = ctx.family.lora_metadata()
     if getattr(args, "moss_image_tokens_only", False):
         ctx.injector.force_bypass = True
+    if getattr(args, "lora_fp32", False):
+        ctx.injector.fp32_weights = True
+    up_multiplier = float(getattr(args, "lora_up_lr_multiplier", 1.0) or 1.0)
+    if up_multiplier != 1.0:
+        ctx.injector.up_lr_multiplier = up_multiplier
+        ctx.injector.up_base_lr = float(args.learning_rate)
+        ctx.injector.metadata_extra["lora_up_lr_multiplier"] = str(up_multiplier)
     if getattr(args, "edit_mode", False):
         # Tells generation tools this LoRA expects a source image (cosmos temporal reference).
         ctx.injector.metadata_extra["edit_reference"] = "cosmos_temporal"
+    from training.lora_card import build_card
+    # Pretty LemongrassisLora summary for the saved file's header (not the config)
+    ctx.injector.metadata_card = build_card(args, ctx.injector, ctx.family.spec.family_id, ctx.model)
     ctx.injector.inject(ctx.model)
     after_inject = getattr(ctx.family, "after_adapter_inject", None)
     if callable(after_inject):
@@ -231,6 +268,7 @@ def _inject_adapter(ctx: TrainingContext) -> None:
         logger.info("continuing training from an existing LoRA: %s", args.resume_lora)
 
     _setup_block_swap(ctx)
+    _setup_partial_checkpoint(ctx)
 
     if getattr(args, "sra_enabled", False):
         from training.families.anima.sra_align import SRAAligner

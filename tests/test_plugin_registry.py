@@ -33,14 +33,14 @@ def test_adapter_builders_dict_has_lokr_loha_lora() -> None:
     assert set(BUILDERS) == {"lokr", "loha", "lora", "ortho", "tlora"}
 
 
-def test_optimizer_builders_dict_has_11_variants() -> None:
+def test_optimizer_builders_dict_has_12_variants() -> None:
     from training.optimizers import BUILDERS, VALIDATORS
     assert set(BUILDERS) == {
         "adamw", "adamw8bit", "automagic", "came", "lion", "muon", "prodigy",
-        "prodigy_plus_schedulefree", "simplified_ademamix", "soap", "soap_sf",
+        "prodigy_plus_schedulefree", "simplified_ademamix", "sinkgd", "soap", "soap_sf",
     }
     assert set(VALIDATORS) == {
-        "adamw8bit", "automagic", "muon", "prodigy_plus_schedulefree", "soap_sf",
+        "adamw8bit", "automagic", "muon", "prodigy_plus_schedulefree", "sinkgd", "soap_sf",
     }
 
 
@@ -112,7 +112,9 @@ def test_scheduler_builders_dict_excludes_none() -> None:
         "cosine_cycles",
         "cosine_with_restart",
         "cosine_with_warmup",
+        "licatron",
         "polynomial",
+        "rerex",
         "rex",
         "rex_annealing_warm_restarts",
     }

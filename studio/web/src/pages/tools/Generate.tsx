@@ -28,7 +28,7 @@ import ZoomableImage from '../../components/ZoomableImage'
 import PreviewHistoryRail, { type TimelineItem } from './generate/PreviewHistoryRail'
 import PromptFromDatasetPicker, { type DatasetPick } from './generate/PromptFromDatasetPicker'
 import {
-  PARAMS_SNAPSHOT_VERSION, applySnapshot, loraBasename, resolveLoraFromCkpts,
+  PARAMS_SNAPSHOT_VERSION, applySnapshot, loraBasename, resolveLoraFromCkpts, shiftCfgRaw, upgradeCfgValue,
   transformAxisRawForSnapshot,
   type GenerateParamsSnapshot, type SnapshotLora,
 } from './generate/paramsSnapshot'
@@ -86,6 +86,9 @@ const DEFAULT_GENERATE_PREFS = {
   // null = follow the Settings page's selected / selected_te (still the default).
   baseModel: null as string | null,
   textEncoder: null as 'bf16' | 'fp8' | null,
+  /** Krea 2 cfg values here are ComfyUI's (1 = no CFG); prefs saved before held
+   *  Krea's guidance (cfg - 1) and are moved up by 1 once, see normalizePrefs. */
+  krea2CfgComfy: true,
 }
 
 type GeneratePrefs = typeof DEFAULT_GENERATE_PREFS
@@ -109,6 +112,17 @@ function normalizePrefs(p: GeneratePrefs): GeneratePrefs {
     return { ...d, loraIndex: xyLoras.length > 0 ? 0 : null }
   }
   const { loras: _legacy, count: _count, ...rest } = anyP  // count is now transient; drop the old persisted value
+  if (!anyP.krea2CfgComfy && rest.modelFamily === 'krea2') {
+    // Saved on Krea's guidance scale (cfg - 1): move to ComfyUI's cfg, incl. a cfg axis
+    const shiftAxis = (d: XYAxisDraft | null | undefined) =>
+      d && d.axis === 'cfg_scale'
+        ? { ...d, raw: shiftCfgRaw(d.raw) }
+        : d
+    if (typeof rest.cfgScale === 'number') rest.cfgScale = upgradeCfgValue(rest.cfgScale)
+    if (rest.xDraft) rest.xDraft = shiftAxis(rest.xDraft) as XYAxisDraft
+    if (rest.yDraft) rest.yDraft = shiftAxis(rest.yDraft) ?? null
+  }
+  rest.krea2CfgComfy = true
   const merged = {
     ...DEFAULT_GENERATE_PREFS,
     ...rest,
@@ -156,7 +170,7 @@ export default function GeneratePage() {
   // linger as a stale field; after this, reads see the clean singleLoras/xyLoras shape.
   useEffect(() => {
     const raw = rawPrefs as Partial<GeneratePrefs> & { loras?: unknown }
-    if ('loras' in raw || !('singleLoras' in raw) || !('xyLoras' in raw)) {
+    if ('loras' in raw || !('singleLoras' in raw) || !('xyLoras' in raw) || !raw.krea2CfgComfy) {
       setRawPrefs(normalizePrefs(rawPrefs))
     }
     // Runs once on mount only: the migration is idempotent, no need to rerun on later rawPrefs changes
@@ -1036,7 +1050,15 @@ export default function GeneratePage() {
                 <NumField label={t('generate.width')} value={width} onChange={(v) => { setWidth(v); setAspect(aspectFromDimensions(v, height)) }} min={256} max={4096} step={64} />
                 <NumField label={t('generate.height')} value={height} onChange={(v) => { setHeight(v); setAspect(aspectFromDimensions(width, v)) }} min={256} max={4096} step={64} />
                 <NumField label={t('generate.steps')} value={steps} onChange={setSteps} min={1} max={150} />
-                <NumField label={t('generate.guidance')} value={cfgScale} onChange={setCfgScale} min={0} max={20} step={0.5} />
+                <NumField
+                  label={t('generate.guidance')}
+                  tip={modelFamily === 'krea2' ? t('generate.guidanceKrea2Hint') : undefined}
+                  value={cfgScale}
+                  onChange={setCfgScale}
+                  min={0}
+                  max={20}
+                  step={0.5}
+                />
                 <NumField
                   label={t('generate.seed')}
                   tip={t('generate.seedHint')}

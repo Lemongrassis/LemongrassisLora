@@ -65,6 +65,27 @@ New MOSS configs start with logit-normal training noise and shift 3.5; existing 
 
 Training sample previews and Generate also support **Euler / SGM Uniform** (`sample_scheduler: sgm_uniform` for training). This schedule uses continuous noise levels and keeps the requested number of steps. Both schedules use the MOSS sampling shift; Simple remains the default.
 
+**DPM++ SDE** (`dpmpp_sde`, `dpmpp_sde_gpu`) follows ComfyUI's sampler of the same name. It makes two model passes per step, so 16 steps at CFG 5 take about 62 passes. Identical noise needs the `torchsde` package; without it the sampler uses independent Gaussian noise and logs a warning. `moss_sample_lora_strength` sets the trained LoRA's strength in previews only.
+
+### SinkGD, ReREX, Gaussian start and caption variations
+
+These options come from the configuration stored in a BluFlow-trained MOSS LoRA. All are off by default.
+
+- **SinkGD** (`optimizer_type: sinkgd`) rescales each gradient's rows and columns before the step ([arXiv 2502.06742](https://arxiv.org/abs/2502.06742)), so every layer moves by about the learning rate per element whatever its gradient scale. It has no momentum and no optimizer memory. BF16 rounding loses updates this small on `lora_down`, so turn on `use_stochastic_rounding` (BF16 weights, updates preserved on average) or `lora_fp32`. Global gradient clipping has almost no effect here because the normalization cancels the gradient's size.
+- **ReREX** (`lr_scheduler: rerex`) is a linear warmup followed by a REX curve walked in segments, each with its own REX drop. Set the length with `max_steps` or epochs, and the warmup with `lr_scheduler_warmup_steps`.
+- **Gaussian start** (`moss_gaussian_init`) draws `lora_down` with std 1 / rank, 0.125 at rank 8. That is about 12 times the usual scale, so the same `lora_up` acts about 12 times stronger.
+- **Caption variations** (`moss_caption_variations`) prepare several versions of each caption before training. Only a tag list before the first period changes: the first `moss_caption_keep_tags` tags stay in place, the rest are shuffled and `moss_caption_tag_dropout` of them are dropped. The text after the period never changes, and captions without a tag list keep one version. Each version is encoded once, so N versions take N times the text cache and encoding time. Every visit of an image, across epochs and resolutions, takes the next version. DOP needs one fixed caption, so it can't be combined with this.
+
+`grad_accum` can stand in for a larger batch on a small GPU: the images train one at a time, their gradients are averaged, and the update is the same size. It needs more time per update, not more memory.
+
+### Turbo LoRA previews
+
+The **Turbo Lora** checkbox in the sample settings draws training previews through a distilled LoRA such as [MOSS-Image-Base-8-steps-dmd](https://huggingface.co/lodestones/MOSS-Image-Base-8-steps-dmd), with the LoRA being trained on top. Pick the file (for example from `models/loras`); steps default to 8 and CFG to 1, and the sampler and schedule are fixed to Euler / Simple. Eight steps without CFG take 8 model passes, against 100 for 50 steps at CFG 3.
+
+The Turbo LoRA is hooked in only while a preview runs: the base weights do not change, and it is not saved with your LoRA. A preview with that file needs about 1.2 GB more VRAM; when it can't be loaded the preview is skipped and training continues. These previews show the result through the distillation, so if you won't generate with a Turbo LoRA, check the final epochs at 50 steps too. CFG 1 ignores the negative prompt.
+
+Generate also accepts these files as a regular LoRA. An INT8 base merges a LoRA into its quantized weights there, which may weaken a distillation LoRA; a BF16 base applies it unmerged.
+
 ## H2D-only offloading
 
 H2D means RAM-to-GPU transfer. The frozen original weights remain in RAM. A layer is copied into a temporary GPU buffer when needed; after use, that buffer can be reused without copying identical weights back into RAM. This saves the reverse transfer. It still requires RAM, PCIe transfers, and enough GPU memory for active buffers and activations.

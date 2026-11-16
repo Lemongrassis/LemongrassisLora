@@ -1,4 +1,4 @@
-"""Independent of AnimaTrainHub: t=0 is data, t=1 is noise.
+"""Independent of LemongrassisLora: t=0 is data, t=1 is noise.
 
 Sample a mixture, NOT an average of samples (which would change its density).
 The two peak locations describe individual components, not the final mixture.

@@ -34,7 +34,7 @@ The driver -> cu wheel mapping is kept in sync both ways with
 `studio/services/torch_setup.py:_DRIVER_TO_BEST_CU`.
 
 ### `launcher.py` (added in this fork)
-Source for the one-click local launcher -- compiled into `AnimaLoraStudio.exe` and just
+Source for the one-click local launcher -- compiled into `LemongrassisLora.exe` and just
 double-clicked. Does the same thing as `studio.bat` (find the repo -> create/reuse the
 venv -> install torch for the GPU -> install requirements -> start
 `python -m studio run`), except the user doesn't need to know how to open a terminal
@@ -54,7 +54,7 @@ include torch / the frontend).
 
 ```
 pip install pyinstaller
-python tools/build_launcher.py           # -> dist/AnimaLoraStudio(.exe)
+python tools/build_launcher.py           # -> dist/LemongrassisLora(.exe)
 ```
 
 PyInstaller can't cross-compile, so the Windows exe can only be produced on Windows --

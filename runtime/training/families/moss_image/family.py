@@ -1,14 +1,89 @@
 """MOSS behavior adapter. The shared training loop remains rectified flow."""
+from functools import lru_cache
+
 from . import MOSS_SPEC
 from .preset import MOSS_PRESET
+
+#: VRAM left free beside the resident text encoder: prompt activations, allocator slack
+_TEXT_HEADROOM_BYTES = 2 * 1024**3
+
+
+@lru_cache(maxsize=1)
+def _dit_param_counts():
+    """(params per backbone layer, total params) of the DiT, from a meta-device build."""
+    from accelerate import init_empty_weights
+    from modeling.moss_image import model as moss_image_models
+    with init_empty_weights():
+        model = moss_image_models.MossImage(**moss_image_models.MOSS_IMAGE_CONFIG)
+    per_layer = [sum(p.numel() for p in layer.parameters()) for layer in model.layers]
+    return per_layer, sum(p.numel() for p in model.parameters())
+
+
+@lru_cache(maxsize=4)
+def _text_layer_bytes(path):
+    """Resident BF16 bytes of each Qwen3.5 decoder layer and of everything else, read from the
+    safetensors headers only (the vision tower / MTP / lm_head are dropped on load, as in the loader)."""
+    import re
+    from safetensors import safe_open
+    from modeling.moss_image.weights import checkpoint_files
+    layers, other = {}, 0
+    for file in checkpoint_files(path):
+        with safe_open(str(file), framework="pt", device="cpu") as reader:
+            for key in reader.keys():
+                if key.startswith(("visual.", "model.visual.", "mtp.", "lm_head.")):
+                    continue
+                numel = 1
+                for dim in reader.get_slice(key).get_shape():
+                    numel *= dim
+                match = re.search(r"(?:^|\.)layers\.(\d+)\.", key)
+                if match:
+                    layers[int(match.group(1))] = layers.get(int(match.group(1)), 0) + 2 * numel
+                else:
+                    other += 2 * numel
+    return [layers[i] for i in sorted(layers)], other
 
 
 class MossFamily:
     spec = MOSS_SPEC
 
+    def preview_base(self, args, model):
+        """Previews through a distilled Turbo LoRA (``sample_turbo_lora``), else None."""
+        if not getattr(args, "sample_turbo_lora", False):
+            return None
+        path = str(getattr(args, "sample_turbo_lora_path", "") or "").strip()
+        if not path:
+            raise ValueError("Previews are set to use a Turbo LoRA, but its file (sample_turbo_lora_path) is empty")
+        from .turbo_lora import MossTurboLora
+        return MossTurboLora(model, path, strength=getattr(args, "sample_turbo_lora_strength", 1.0))
+
     def swappable_blocks(self, *, checkpoint_path=""):
         from modeling.moss_image.model import MOSS_IMAGE_CONFIG
         return MOSS_IMAGE_CONFIG["num_layers"]
+
+    def swapped_param_ratio(self, blocks_to_swap, *, checkpoint_path=""):
+        """Share of the DiT's parameters in the trailing ``blocks_to_swap`` layers (VRAM budget discount)."""
+        if blocks_to_swap <= 0:
+            return 0.0
+        per_layer, total = _dit_param_counts()
+        return min(blocks_to_swap, len(per_layer)) * per_layer[0] / total if total else 0.0
+
+    def generate_text_options(self, text_encoder_path):
+        """Generate-time text encoder offload: the 9B Qwen3.5 is ~16GB in BF16, so on smaller cards
+        the trailing layers stream from RAM while the prompts are encoded (the TE is released before
+        the DiT loads, so only the encode itself pays for it)."""
+        from training import sysmem
+        layer_bytes, other_bytes = _text_layer_bytes(text_encoder_path)
+        free = sysmem.gpu_free_bytes_global()
+        if not layer_bytes or free is None:
+            return {}
+        budget = free - other_bytes - _TEXT_HEADROOM_BYTES
+        resident, kept = 0, 0
+        for size in layer_bytes:  # leading layers stay on the GPU, offload counts from the tail
+            if resident + size > budget:
+                break
+            resident += size
+            kept += 1
+        return {"offload_layers": len(layer_bytes) - kept} if kept < len(layer_bytes) else {}
 
     def load_options(self, args):
         get = args.get if isinstance(args, dict) else lambda k, d: getattr(args, k, d)
@@ -111,10 +186,22 @@ class MossFamily:
             args.train_norm = True
 
     def after_adapter_inject(self, model, injector, args):
-        from .experimental import BlockModulation, IMAGE_TOKENS_ONLY_KEY, install_image_token_mask
+        from .experimental import (
+            BlockModulation,
+            IMAGE_TOKENS_ONLY_KEY,
+            init_down_from_weight_svd,
+            init_down_gaussian,
+            install_image_token_mask,
+        )
         if getattr(args, IMAGE_TOKENS_ONLY_KEY, False):
             install_image_token_mask(model, injector.network)
             injector.metadata_extra[IMAGE_TOKENS_ONLY_KEY] = "true"
+        if getattr(args, "moss_gaussian_init", False):
+            init_down_gaussian(injector.network)
+            injector.metadata_extra["moss_down_init"] = "gaussian"
+        if getattr(args, "moss_svd_init", False):
+            init_down_from_weight_svd(injector.network)
+            injector.metadata_extra["moss_down_init"] = "weight_svd"
         if getattr(args, "moss_block_modulation", False):
             network = injector.network
             module = BlockModulation(

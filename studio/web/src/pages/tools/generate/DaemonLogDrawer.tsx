@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../../api/client'
 import { useEventStream } from '../../../lib/useEventStream'
 import { useToast } from '../../../components/Toast'
+import { copyText } from '../../../lib/clipboard'
 
 interface LogEntry {
   ts: number
@@ -10,12 +11,22 @@ interface LogEntry {
   line: string
 }
 
+const MAX_LINES = 2000
+/** SSE lines are batched into one render per window: during sampling the daemon logs fast enough
+ * that a render per line froze the page (no scrolling, unclickable buttons). */
+const FLUSH_MS = 150
+/** Within this many px of the bottom counts as "following the tail". */
+const STICK_PX = 24
+
+const capLines = (list: LogEntry[]) => (list.length > MAX_LINES ? list.slice(-MAX_LINES) : list)
+
 /** Drawer for the daemon's stderr ring buffer.
  *
  * - Slides up 40vh from the bottom, high z-index, covers the Generate page surface below it without taking up layout space
  * - translateY(100%) when hidden, fully invisible (not just visibility:hidden -- the whole drawer leaves the viewport)
  * - Fetches history via GET /api/generate/daemon/logs on first open, then increments via SSE daemon_log_line
  * - Closing and reopening: only shows the history + whatever's arrived since; nothing is lost (ring buffer maxlen=2000)
+ * - Scrolling up pauses auto-scroll; scrolling back to the bottom resumes it
  */
 export default function DaemonLogDrawer({
   open, onClose,
@@ -29,6 +40,12 @@ export default function DaemonLogDrawer({
   const [autoScroll, setAutoScroll] = useState(true)
   const seqRef = useRef(0)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const pendingRef = useRef<LogEntry[]>([])
+  const flushTimer = useRef<number | null>(null)
+
+  useEffect(() => () => {
+    if (flushTimer.current !== null) window.clearTimeout(flushTimer.current)
+  }, [])
 
   // Fetches history on open; doesn't clear on close (stays visible immediately next time it opens)
   useEffect(() => {
@@ -37,7 +54,7 @@ export default function DaemonLogDrawer({
     void api.getDaemonLogs(seqRef.current).then((r) => {
       if (cancelled) return
       if (r.entries.length > 0) {
-        setEntries((prev) => [...prev, ...r.entries])
+        setEntries((prev) => capLines([...prev, ...r.entries]))
         seqRef.current = r.next_seq
       } else if (seqRef.current === 0) {
         seqRef.current = r.next_seq
@@ -52,15 +69,19 @@ export default function DaemonLogDrawer({
     const seq = typeof evt.seq === 'number' ? evt.seq : seqRef.current
     if (seq < seqRef.current) return  // ignore stale events
     seqRef.current = seq + 1
-    setEntries((prev) => {
-      const next = [...prev, {
-        ts: Number(evt.ts) || Date.now() / 1000,
-        seq,
-        line: String(evt.line ?? ''),
-      }]
-      // Guard memory: the client also caps it at 2000 lines
-      return next.length > 2000 ? next.slice(-2000) : next
+    pendingRef.current.push({
+      ts: Number(evt.ts) || Date.now() / 1000,
+      seq,
+      line: String(evt.line ?? ''),
     })
+    if (flushTimer.current !== null) return
+    flushTimer.current = window.setTimeout(() => {
+      flushTimer.current = null
+      const batch = pendingRef.current
+      pendingRef.current = []
+      // Guard memory: the client also caps it at 2000 lines
+      setEntries((prev) => capLines(prev.concat(batch)))
+    }, FLUSH_MS)
   }, []))
 
   // Auto-scroll to the bottom
@@ -70,18 +91,26 @@ export default function DaemonLogDrawer({
     if (el) el.scrollTop = el.scrollHeight
   }, [entries, autoScroll, open])
 
+  // The user scrolling away from the tail pauses following; returning to the bottom resumes it
+  const handleScroll = () => {
+    const el = scrollRef.current
+    if (!el) return
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_PX
+    if (atBottom !== autoScroll) setAutoScroll(atBottom)
+  }
+
+  // One text node instead of one element per line: cheap to re-render, selectable as a whole
+  const text = useMemo(() => (open ? entries.map((e) => e.line).join('\n') : ''), [entries, open])
+
   const handleClear = () => {
+    pendingRef.current = []
     setEntries([])
   }
 
   const handleCopy = async () => {
-    const text = entries.map((e) => e.line).join('\n')
-    try {
-      await navigator.clipboard.writeText(text)
-      toast(t('generate.logDrawerCopied'), 'success')
-    } catch {
-      toast(t('queueDetail.copyFailed'), 'error')
-    }
+    const all = entries.map((e) => e.line).join('\n')
+    if (await copyText(all)) toast(t('generate.logDrawerCopied'), 'success')
+    else toast(t('queueDetail.copyFailed'), 'error')
   }
 
   return (
@@ -137,6 +166,7 @@ export default function DaemonLogDrawer({
       </header>
       <div
         ref={scrollRef}
+        onScroll={handleScroll}
         style={{
           flex: 1, minHeight: 0,
           overflowY: 'auto',
@@ -152,11 +182,9 @@ export default function DaemonLogDrawer({
             {t('generate.logDrawerEmpty')}
           </div>
         ) : (
-          entries.map((e) => (
-            <div key={e.seq} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: 'var(--fg-primary)' }}>
-              {e.line}
-            </div>
-          ))
+          <pre style={{ margin: 0, font: 'inherit', whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: 'var(--fg-primary)', userSelect: 'text' }}>
+            {text}
+          </pre>
         )}
       </div>
     </div>

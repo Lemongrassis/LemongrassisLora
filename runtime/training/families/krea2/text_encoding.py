@@ -144,6 +144,12 @@ def patch_manual_cast(model: torch.nn.Module, compute_dtype: torch.dtype) -> int
 
     patched = 0
     for module in model.modules():
+        if isinstance(module, (torch.nn.Linear, torch.nn.Embedding)) and module.weight.dtype == torch.int8:
+            # ConvRot INT8 layers already dequantize in their own forward;
+            # the embedding only needs to emit the compute dtype
+            if isinstance(module, torch.nn.Embedding):
+                module._int8_compute_dtype = compute_dtype
+            continue
         if isinstance(module, torch.nn.Linear):
             if module.weight.dtype in _FP8_TORCH_DTYPES:
                 # fp8_scaled layers already have a dequant forward attached
@@ -177,6 +183,23 @@ def _comfy_te_single_file(model_path: Path) -> Path | None:
         return None
     candidates = sorted(model_path.glob("*.safetensors"))
     return candidates[0] if len(candidates) == 1 else None
+
+
+def _single_file_is_int8(weights_file: Path) -> bool:
+    """True when the comfy single-file TE stores ConvRot/tensorwise INT8 weights (header-only read)."""
+    import json
+    import struct
+
+    try:
+        with open(weights_file, "rb") as handle:
+            (size,) = struct.unpack("<Q", handle.read(8))
+            header = json.loads(handle.read(size))
+    except (OSError, struct.error, ValueError):
+        return False
+    return any(
+        isinstance(info, dict) and info.get("dtype") == "I8"
+        for key, info in header.items() if key != "__metadata__"
+    )
 
 
 def _load_comfy_single_file_te(
@@ -222,11 +245,24 @@ def _load_comfy_single_file_te(
     with init_empty_weights():
         model = Qwen3VLForConditionalGeneration(config)
 
+    from training.families.quant_int8 import (  # noqa: PLC0415
+        parse_int8_spec,
+        patch_int8_embedding,
+        patch_int8_linear,
+    )
+
     state_dict: dict[str, torch.Tensor] = {}
     scales: dict[str, torch.Tensor] = {}
+    quant_blobs: dict[str, torch.Tensor] = {}
     with safe_open(str(weights_file), framework="pt", device="cpu") as handle:
         for key in handle.keys():
             if key.endswith(".comfy_quant"):
+                mapped = key
+                for prefix in _COMFY_TE_TEXT_PREFIXES:
+                    if key.startswith(prefix):
+                        mapped = "model.language_model." + key[len("model."):]
+                        break
+                quant_blobs[mapped[: -len(".comfy_quant")]] = handle.get_tensor(key)
                 continue
             mapped = key
             for prefix in _COMFY_TE_TEXT_PREFIXES:
@@ -238,11 +274,13 @@ def _load_comfy_single_file_te(
                 layer = mapped[: -len(".weight_scale")]
                 scales[layer] = tensor.to(device=device)
                 continue
-            if tensor.dtype in _FP8_TORCH_DTYPES:
+            if tensor.dtype in _FP8_TORCH_DTYPES or tensor.dtype == torch.int8:
                 state_dict[mapped] = tensor.to(device=device)
             else:
                 state_dict[mapped] = tensor.to(device=device, dtype=dtype)
 
+    # assign=True keeps the module's requires_grad; int8 tensors can't carry grad
+    model.requires_grad_(False)
     result = model.load_state_dict(state_dict, strict=False, assign=True)
     unexpected = list(result.unexpected_keys)
     missing = [k for k in result.missing_keys if k != "lm_head.weight"]
@@ -275,6 +313,28 @@ def _load_comfy_single_file_te(
     # parameters) -- move them to the target device; parameters are already
     # assigned in place, so .to() is a no-op for them
     model.to(device)
+    # INT8 (Comfy-Org qwen3vl_4b_int8_convrot): dequantize per layer in the
+    # forward, int8 weights stay resident (~4.9GB)
+    int8_count = 0
+    for name, module in model.named_modules():
+        weight = getattr(module, "weight", None)
+        if weight is None or weight.dtype != torch.int8:
+            continue
+        if name == "lm_head":
+            # tied to the int8 embed_tokens; encoding reads hidden states only
+            continue
+        scale = scales.pop(name, None)
+        if scale is None:
+            raise ValueError(f"Qwen3-VL int8 layer {name} has no weight_scale")
+        blob = quant_blobs.get(name)
+        group = parse_int8_spec(blob) if blob is not None else 0
+        if isinstance(module, torch.nn.Embedding):
+            patch_int8_embedding(module, scale, group, dtype)
+        else:
+            patch_int8_linear(module, scale, group, forward="dequant")
+        int8_count += 1
+    if int8_count:
+        logger.info("Qwen3-VL int8 ConvRot: attached a dequant forward to %d layers", int8_count)
     if scales:
         patch_fp8_linears(model, scales)
         logger.info("Qwen3-VL fp8_scaled: attached a dequant forward to %d layers", len(scales))
@@ -356,7 +416,9 @@ class Krea2TextStack:
         # Whether the directory is the official fp8_scaled single-file form
         # (comfy layout) -- affects the orchestration layer's VRAM budget
         # decision for loading the TE (~5GB weights vs fp16 8.9GB) and the training text cache fingerprint
-        self.is_fp8_storage = _comfy_te_single_file(self.model_path) is not None
+        single_file = _comfy_te_single_file(self.model_path)
+        self.is_fp8_storage = single_file is not None
+        self.is_int8_storage = single_file is not None and _single_file_is_int8(single_file)
         self.cache_enabled = bool(cache_enabled)
         self.tokenizer = tokenizer if tokenizer is not None else _load_tokenizer(self.model_path)
         self._model_loader = model_loader or _default_model_loader
@@ -366,7 +428,9 @@ class Krea2TextStack:
         # level -- distinguishing the fingerprint prevents mixing cache
         # sources (changing TE precision -> fingerprint changes -> a full,
         # one-time sidecar re-encode)
-        if self.is_fp8_storage:
+        if self.is_int8_storage:
+            text_fingerprint = f"{text_fingerprint}-teint8"
+        elif self.is_fp8_storage:
             text_fingerprint = f"{text_fingerprint}-tefp8"
         self.store = TextCacheStore(text_fingerprint)
         self.max_length = int(max_length)

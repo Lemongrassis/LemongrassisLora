@@ -17,6 +17,7 @@ import { useToast } from '../components/Toast'
 import KebabMenu, { type KebabItem } from '../components/ds/KebabMenu'
 import PageHead from '../components/ds/PageHead'
 import YamlLines from '../components/ds/YamlLines'
+import { copyText } from '../lib/clipboard'
 import { useEventStream } from '../lib/useEventStream'
 import { useMonitorProgress } from '../lib/useMonitorProgress'
 import { useQueueFormat, type QueueFormat } from '../lib/queueFormat'
@@ -625,8 +626,8 @@ function LogCard({ taskId, onOpenLog }: { taskId: number; onOpenLog: () => void 
     if (follow && boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight
   }, [content, follow])
   const copy = async () => {
-    try { await navigator.clipboard.writeText(content); toast(t('queueDetail.logCopied'), 'success') }
-    catch { toast(t('queueDetail.copyFailed'), 'error') }
+    if (await copyText(content)) toast(t('queueDetail.logCopied'), 'success')
+    else toast(t('queueDetail.copyFailed'), 'error')
   }
   return (
     <div className="ds-card ds-qd-log-card">
@@ -802,6 +803,12 @@ function PropsCard({ task, fmt, onSaved }: { task: Task; fmt: QueueFormat; onSav
         {task.config_path && <Kv k={t('queueDetail.configPath')} v={tail(task.config_path)} title={task.config_path} />}
         {task.monitor_state_path && <Kv k={t('queueDetail.monitorFile')} v={tail(task.monitor_state_path)} title={task.monitor_state_path} />}
         <Kv k={t('queueDetail.exitCode')} v={task.exit_code ?? '—'} />
+        {!!task.auto_restarts && <Kv k={t('queueDetail.autoRestarts')} v={task.auto_restarts} />}
+        {task.last_crash_msg && task.last_crash_msg !== task.error_msg && (
+          <div className="ds-note font-mono" style={{ marginTop: 8, fontSize: 11, overflowWrap: 'anywhere' }}>
+            <b>{t('queueDetail.lastCrash')}:</b> {task.last_crash_msg}
+          </div>
+        )}
         {task.error_msg && (
           <div className="ds-note ds-warn font-mono" style={{ marginTop: 8, fontSize: 11, overflowWrap: 'anywhere' }}>{task.error_msg}</div>
         )}

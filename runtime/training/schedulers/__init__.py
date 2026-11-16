@@ -23,6 +23,7 @@ from training.schedulers import (
     cosine_with_warmup,
     licatron,
     polynomial,
+    rerex,
     rex,
     rex_annealing_warm_restarts,
 )
@@ -39,6 +40,7 @@ BUILDERS: dict[str, Callable] = {
     "cosine_with_warmup": cosine_with_warmup.build,
     "licatron": licatron.build,
     "polynomial": polynomial.build,
+    "rerex": rerex.build,
     "rex": rex.build,
     "rex_annealing_warm_restarts": rex_annealing_warm_restarts.build,
 }

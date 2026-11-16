@@ -1,6 +1,6 @@
 <div align="center">
 
-# AnimaTrainHub
+# LemongrassisLora
 
 **Локальная студия для обучения LoRA / LoKr под Anima и Krea 2.**<br>
 От сырых картинок до тестовых генераций в одном окне браузера, в том числе с телефона.
@@ -169,7 +169,7 @@ Block swap, fp8, кеши латентов и текстового энкоде�
 ## Чем отличается от оригинала
 
 > [!NOTE]
-> AnimaTrainHub вырос из форка [WalkingMeatAxolotl/AnimaLoraStudio](https://github.com/WalkingMeatAxolotl/AnimaLoraStudio). Ядро тренировки и бэкенд синхронизированы с upstream **v0.20.2**. Всё, с чем человек работает руками, переделано.
+> LemongrassisLora вырос из форка [WalkingMeatAxolotl/AnimaLoraStudio](https://github.com/WalkingMeatAxolotl/AnimaLoraStudio). Ядро тренировки и бэкенд синхронизированы с upstream **v0.20.2**. Всё, с чем человек работает руками, переделано.
 
 <table>
 <tr>
@@ -238,11 +238,11 @@ Block swap, fp8, кеши латентов и текстового энкоде�
 ### 2 · Запуск
 
 ```bash
-git clone https://github.com/DualChimerra/AnimaTrainHub
-cd AnimaTrainHub
+git clone https://github.com/Lemongrassis/LemongrassisLora
+cd LemongrassisLora
 ```
 
-**Windows**: `AnimaLoraStudio.exe` или `studio.bat`<br>
+**Windows**: `LemongrassisLora.exe` или `studio.bat`<br>
 **Linux / macOS**: `./studio.sh`
 
 </td>
@@ -308,7 +308,7 @@ python -m studio test         # pytest + vitest
 
 studio.bat --torch=cu128      # принудительно выбрать сборку PyTorch
 studio.bat --reinstall        # пересоздать venv (studio_data сохраняется)
-AnimaLoraStudio.exe --check   # диагностика: Python, venv, GPU, пути кешей
+LemongrassisLora.exe --check   # диагностика: Python, venv, GPU, пути кешей
 
 python tools/download_models.py                  # все модели с HuggingFace
 python tools/download_models.py --modelscope     # через ModelScope
@@ -393,7 +393,7 @@ python tools/download_models.py --endpoint URL   # через своё зерк�
 <summary><b>Структура репозитория</b></summary>
 
 ```
-AnimaTrainHub/
+LemongrassisLora/
 ├── runtime/        # ядро тренировки, генерация, демон инференса (работает и из CLI)
 ├── studio/         # веб-студия: FastAPI (api / services / domain / infrastructure / workers)
 │   └── web/        # интерфейс: React + Vite + Tailwind
@@ -430,7 +430,7 @@ AnimaTrainHub/
 
 <div align="center">
 
-**AnimaTrainHub** · для тех, кто обучает LoRA, а не читает скрипты тренировки
+**LemongrassisLora** · для тех, кто обучает LoRA, а не читает скрипты тренировки
 
 <sub>На скриншотах демонстрационные данные.</sub>
 

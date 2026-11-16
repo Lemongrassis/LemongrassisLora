@@ -89,8 +89,28 @@ def parse_comfy_quant(blob: Tensor | bytes) -> dict:
     return {"format": INT8_CONVROT_FORMAT, "convrot": True, "convrot_groupsize": group}
 
 
+def parse_int8_spec(blob: Tensor | bytes) -> int:
+    """Parse a ``{layer}.comfy_quant`` U8 blob of any ComfyUI ``int8_tensorwise`` layer.
+
+    Returns the convrot group size, or 0 for plain ``int8_tensorwise`` (no rotation, scalar or
+    per-row scale, e.g. Krea2 Turbo INT8 files).
+    """
+    raw = bytes(blob.tolist()) if isinstance(blob, Tensor) else bytes(blob)
+    try:
+        conf = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise ValueError(f"comfy_quant config is not valid JSON: {exc}") from exc
+    if not isinstance(conf, dict) or conf.get("format", INT8_CONVROT_FORMAT) != INT8_CONVROT_FORMAT:
+        raise ValueError(f"Only {INT8_CONVROT_FORMAT} int8 weights are supported, got {conf}")
+    if not conf.get("convrot"):
+        return 0
+    return parse_comfy_quant(raw)["convrot_groupsize"]
+
+
 def rotate_activation(x: Tensor, group: int) -> Tensor:
-    """``x @ H`` (in groups of ``group`` along the last dim)."""
+    """``x @ H`` (in groups of ``group`` along the last dim); identity for ``group=0`` (no convrot)."""
+    if not group:
+        return x
     features = x.shape[-1]
     if features % group:
         raise ValueError(f"Input dim {features} is not divisible by convrot group size {group}")
@@ -171,9 +191,12 @@ def int8_mm(a: Tensor, b: Tensor) -> Tensor:
 
 def w8a8_linear(x: Tensor, qweight: Tensor, weight_scale: Tensor, group: int,
                 bias: Tensor | None = None) -> Tensor:
-    """Bit-exact copy of comfy-kitchen eager ``int8_linear`` (convrot); output dtype = ``x.dtype``."""
+    """Bit-exact copy of comfy-kitchen eager ``int8_linear``; output dtype = ``x.dtype``.
+
+    ``group=0`` is plain ``int8_tensorwise`` (``convrot=False``): no activation rotation."""
     out_dtype = x.dtype
-    x = _rotate_activation_comfy(x, group)
+    if group:
+        x = _rotate_activation_comfy(x, group)
     orig_shape = x.shape
     x_8, x_scale = quantize_rowwise(x.reshape(-1, x.shape[-1]))
     acc = int8_mm(x_8, qweight.to(device=x.device).T.contiguous())
@@ -194,8 +217,10 @@ def requantize_convrot(weight: Tensor, group: int, *, seed: int) -> tuple[Tensor
 
 def dequantize(qweight: Tensor, scale: Tensor, group: int) -> Tensor:
     """int8 + row-wise scale -> fp32 weight in the original basis (comfy-kitchen ``dequantize_int8_convrot_weight``:
-    multiply by scale in fp32, then by Hᵀ per group; callers ``.to(dtype)`` as needed)."""
+    multiply by scale in fp32, then by Hᵀ per group; callers ``.to(dtype)`` as needed). ``group=0``: no rotation."""
     w = qweight.float() * scale.float()
+    if not group:
+        return w
     out_f, in_f = w.shape
     h = hadamard(group, device=w.device, dtype=torch.float32)
     return (w.reshape(out_f, in_f // group, group) @ h.T).reshape(out_f, in_f)
@@ -237,11 +262,15 @@ def patch_int8_linear(module: nn.Linear, scale: Tensor, group: int, *,
         raise ValueError(f"int8 patch target is not a Linear: {type(module).__name__}")
     if module.weight.dtype != torch.int8:
         raise ValueError(f"int8 patch target weight is not int8: {module.weight.dtype}")
-    if scale.shape not in ((module.out_features, 1), (module.out_features,)):
+    allowed_shapes = ((module.out_features, 1), (module.out_features,))
+    if not group:
+        # plain int8_tensorwise: ComfyUI also accepts a scalar (tensor-wise) scale
+        allowed_shapes += ((), (1,), (1, 1))
+    if scale.shape not in allowed_shapes:
         raise ValueError(
             f"int8 weight_scale shape {tuple(scale.shape)} does not match out_features={module.out_features}"
         )
-    if module.in_features % group:
+    if group and module.in_features % group:
         raise ValueError(f"in_features={module.in_features} is not divisible by convrot group size {group}")
     module.register_buffer("scale_weight", scale.to(dtype=torch.float32), persistent=False)
     module._convrot_groupsize = int(group)

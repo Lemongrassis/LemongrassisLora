@@ -79,7 +79,7 @@ runtime/training/
     │   ├── ortho.py / tlora.py ← OrthoLoRA / T-LoRA builder
     │   └── __init__.py        ← BUILDERS dict + build_adapter + validate_schema_consistency
     │
-    ├── optimizers/          ← adamw / adamw8bit / automagic / came / lion / prodigy / prodigy_plus_schedulefree / soap / soap_sf
+    ├── optimizers/          ← adamw / adamw8bit / automagic / came / lion / prodigy / prodigy_plus_schedulefree / sinkgd / soap / soap_sf
     │   └── __init__.py        ← BUILDERS + VALIDATORS + build_optimizer + validate_optimizer
     │
     ├── schedulers/          ← cosine / cosine_with_restart / cosine_with_warmup ("none" is schema-only, no file)

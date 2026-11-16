@@ -43,14 +43,21 @@ logger = logging.getLogger(__name__)
 
 _FP8_TORCH_DTYPES = (torch.float8_e4m3fn, torch.float8_e5m2)
 _SUPPORTED_FORMATS = {"float8_e4m3fn", "float8_e5m2"}
+#: MXFP8 (e.g. krea2_turbo_mxfp8): fp8 e4m3 weights + one E8M0 exponent per 32 inputs,
+#: stored in comfy-kitchen's swizzled cuBLAS layout
+MXFP8_FORMAT = "mxfp8"
+MXFP8_BLOCK = 32
+#: Plain ComfyUI int8 (e.g. krea2TurboINT8): int8 weights + tensor-wise F32 scale, no convrot
+INT8_TENSORWISE_FORMAT = "int8_tensorwise"
+_KNOWN_FORMATS = _SUPPORTED_FORMATS | {MXFP8_FORMAT, INT8_TENSORWISE_FORMAT}
 
 
 def parse_quantization_metadata(metadata: dict | None) -> dict[str, dict]:
     """Parse safetensors ``__metadata__._quantization_metadata`` (the Comfy protocol).
 
     Returns {layer name: layer config dict}; returns an empty dict if
-    undeclared; raises if an unsupported format is declared (only the two fp8
-    forms are supported -- scope decided by the user).
+    undeclared; raises if an unsupported format is declared (fp8, mxfp8 and
+    int8_tensorwise are supported).
     """
     if not metadata:
         return {}
@@ -67,13 +74,12 @@ def parse_quantization_metadata(metadata: dict | None) -> dict[str, dict]:
     unsupported = {
         str(conf.get("format"))
         for conf in layers.values()
-        if isinstance(conf, dict) and conf.get("format") not in _SUPPORTED_FORMATS
+        if isinstance(conf, dict) and conf.get("format") not in _KNOWN_FORMATS
     }
     if unsupported:
         raise ValueError(
             f"Krea2 checkpoint declares an unsupported quantization format {sorted(unsupported)}; "
-            f"inference currently only supports fp8 ({sorted(_SUPPORTED_FORMATS)}) -- "
-            f"for int8/nvfp4/int4, use bf16 or fp8 weights instead"
+            f"supported: {sorted(_KNOWN_FORMATS)} -- for nvfp4/int4, use bf16, fp8 or int8 weights instead"
         )
     return {str(layer): dict(conf) for layer, conf in layers.items()}
 
@@ -139,6 +145,74 @@ def patch_fp8_linears(
         patched += 1
     if patched:
         logger.info("Krea2 fp8 inference: attached dequant forward to %d Linear layers", patched)
+    return patched
+
+
+def mxfp8_scale_shape(out_features: int, in_features: int) -> tuple[int, int]:
+    """Stored shape of an MXFP8 block-scale tensor: padded to 128 rows x 4 block columns."""
+    blocks = in_features // MXFP8_BLOCK
+    return -(-out_features // 128) * 128, -(-blocks // 4) * 4
+
+
+def unswizzle_mxfp8_scales(blocked: torch.Tensor, rows: int, cols: int) -> torch.Tensor:
+    """comfy-kitchen ``float_utils.from_blocked``: cuBLAS tiled layout -> plain ``[rows, cols]`` uint8."""
+    row_blocks = -(-rows // 128)
+    col_blocks = -(-cols // 4)
+    tiles = blocked.view(torch.uint8).reshape(-1, 32, 16)
+    tiles = tiles.reshape(-1, 32, 4, 4).transpose(1, 2)
+    tiles = tiles.reshape(row_blocks, col_blocks, 4, 32, 4).reshape(row_blocks, col_blocks, 128, 4)
+    plain = tiles.permute(0, 2, 1, 3).reshape(row_blocks * 128, col_blocks * 4)
+    return plain[:rows, :cols].contiguous()
+
+
+def _e8m0_to_float(exponents: torch.Tensor) -> torch.Tensor:
+    """comfy-kitchen ``e8m0_to_f32``: 2^(e-127) as float32; e=0 maps to 0."""
+    biased = exponents.to(torch.int32)
+    values = (biased << 23).view(torch.float32)
+    return torch.where(biased == 0, torch.zeros_like(values), values)
+
+
+def _mxfp8_linear_forward(self, input: torch.Tensor) -> torch.Tensor:
+    # comfy-kitchen eager dequantize_mxfp8 + F.linear (Ada has no MXFP8 matmul, so ComfyUI
+    # dequantizes too). Scales are powers of two, so scaling in the compute dtype is exact
+    # and matches Comfy's fp32 product cast to that dtype.
+    out_f, in_f = self.weight.shape
+    weight = self.weight.to(input.dtype).reshape(out_f, in_f // MXFP8_BLOCK, MXFP8_BLOCK)
+    scale = _e8m0_to_float(self.weight_block_scale).to(input.dtype)
+    weight = (weight * scale.unsqueeze(-1)).reshape(out_f, in_f)
+    bias = self.bias
+    if bias is not None and bias.dtype != input.dtype:
+        bias = bias.to(input.dtype)
+    return torch.nn.functional.linear(input, weight, bias)
+
+
+def patch_mxfp8_linears(
+    model: torch.nn.Module,
+    block_scales: dict[str, torch.Tensor],
+    *,
+    device: torch.device | None = None,
+) -> int:
+    """Attach the MXFP8 dequant forward; block scales are kept unswizzled as uint8 exponents
+    (a quarter of the bf16 size) on the compute device -- the block-swap rule of patch_fp8_linears."""
+    patched = 0
+    modules = dict(model.named_modules())
+    for layer, blocked in block_scales.items():
+        module = modules.get(layer)
+        if module is None or not isinstance(module, torch.nn.Linear):
+            raise ValueError(f"mxfp8-quantized layer doesn't exist in the model or isn't a Linear: {layer}")
+        if module.weight.dtype not in _FP8_TORCH_DTYPES:
+            raise ValueError(f"mxfp8 patch target layer's weight isn't fp8: {layer} ({module.weight.dtype})")
+        out_f, in_f = module.weight.shape
+        exponents = unswizzle_mxfp8_scales(blocked, out_f, in_f // MXFP8_BLOCK)
+        module.register_buffer(
+            "weight_block_scale",
+            exponents.to(device=device if device is not None else module.weight.device),
+            persistent=False,
+        )
+        module.forward = MethodType(_mxfp8_linear_forward, module)
+        patched += 1
+    if patched:
+        logger.info("Krea2 mxfp8 inference: attached dequant forward to %d Linear layers", patched)
     return patched
 
 

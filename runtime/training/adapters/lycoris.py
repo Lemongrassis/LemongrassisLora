@@ -31,6 +31,8 @@ def build(args, *, preset: dict[str, Any]) -> AdapterProtocol:
         rank_dropout=float(getattr(args, "lora_rank_dropout", 0.0) or 0.0),
         module_dropout=float(getattr(args, "lora_module_dropout", 0.0) or 0.0),
         weight_decompose=bool(getattr(args, "lora_dora", False)),
+        dora_axis=str(getattr(args, "lora_dora_axis", "output") or "output"),
+        dora_compute=str(getattr(args, "lora_dora_compute", "lycoris") or "lycoris"),
         rs_lora=bool(getattr(args, "lora_rs", False)),
         lora_reg_dims=getattr(args, "lora_reg_dims", None) or None,
         train_norm=bool(getattr(args, "train_norm", False)),

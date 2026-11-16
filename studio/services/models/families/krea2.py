@@ -62,6 +62,19 @@ KREA2_VARIANTS: dict[str, dict[str, Any]] = {
         "purpose": "inference",
         "size_estimate": 13_100_000_000,
     },
+    # ConvRot INT8 Turbo from Comfy-Org: the most accurate 13.5GB Turbo (weight
+    # error ~1% vs fp8's ~2.6%). Keeps Comfy-Org's file name, so a copy already
+    # in a ComfyUI diffusion_models folder is recognized as Turbo (distilled
+    # defaults), not listed as an unknown custom model.
+    "turbo_int8": {
+        "repo": "Comfy-Org/Krea-2",
+        "subpath": "diffusion_models/krea2_turbo_int8_convrot.safetensors",
+        "ms_repo": "Comfy-Org/Krea-2",
+        "ms_subpath": "diffusion_models/krea2_turbo_int8_convrot.safetensors",
+        "filename": "krea2_turbo_int8_convrot.safetensors",
+        "purpose": "inference",
+        "size_estimate": 13_500_000_000,
+    },
 }
 LATEST_KREA2 = "raw"
 KREA2_LICENSE = "Krea 2 Community License"

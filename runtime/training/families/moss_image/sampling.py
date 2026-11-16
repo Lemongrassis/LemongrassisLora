@@ -5,6 +5,8 @@ Simple schedule and CFG order adapted from ComfyUI via WalkingMeatAxolotl/AnimaL
 import torch
 from modeling.moss_image.vae import unpatchify_latents
 
+from ...block_swap import find_block_swap, move_module_excluding
+
 def _sigma_grid(count: int, shift: float, total: int) -> torch.Tensor:
     lower = shift / (total + shift - 1)
     values = torch.linspace(1, lower, count, dtype=torch.float32)
@@ -53,8 +55,8 @@ def sample_image(model, vae, text, prompt, *, height=1024, width=1024, steps=Non
                  distilled=False, device="cuda", dtype=None, step_callback=None,
                  phase_callback=None, seed=None, vram_policy=None):
     from PIL import Image
-    if sampler_name not in (None, "euler") or scheduler not in (None, "simple", "sgm_uniform"):
-        raise ValueError("MOSS sampling supports Euler with simple or sgm_uniform")
+    if sampler_name not in (None, "euler", "dpmpp_sde", "dpmpp_sde_gpu") or scheduler not in (None, "simple", "sgm_uniform"):
+        raise ValueError("MOSS sampling supports Euler or DPM++ SDE with simple or sgm_uniform")
     if height % 16 or width % 16 or min(height, width) < 16:
         raise ValueError("MOSS image dimensions must be positive multiples of 16")
     if distilled:
@@ -68,8 +70,10 @@ def sample_image(model, vae, text, prompt, *, height=1024, width=1024, steps=Non
     prompts = [prompt] + ([negative_prompt] if cfg != 1 else [])
     # The inference path can yield the DiT. During training, prompts are pre-cached.
     yielded = vram_policy is not None and not text.online_conditions_cached(prompts)
+    # Swap-aware: block-swapped weights already live in pinned RAM and must not ride along
+    swap = find_block_swap(model)
     if yielded:
-        model.to("cpu")
+        move_module_excluding(model, "cpu", swap)
         if device.type == "cuda":
             torch.cuda.empty_cache()
     try:
@@ -77,12 +81,10 @@ def sample_image(model, vae, text, prompt, *, height=1024, width=1024, steps=Non
         text.release_model()
     finally:
         if yielded:
-            model.to(device)
+            move_module_excluding(model, device, swap)
     generator = torch.Generator(device="cpu")
-    if seed is not None:
-        generator.manual_seed(int(seed))
-    else:
-        generator.manual_seed(int(torch.randint(0, 2**31 - 1, (1,)).item()))
+    used_seed = int(seed) if seed is not None else int(torch.randint(0, 2**31 - 1, (1,)).item())
+    generator.manual_seed(used_seed)
     latent = torch.randn((1, 128, height // 16, width // 16), generator=generator).to(device)
     sigmas = get_sampling_sigmas(
         steps, getattr(model, "sample_flow_shift", 5.0), scheduler=scheduler or "simple",
@@ -90,28 +92,41 @@ def sample_image(model, vae, text, prompt, *, height=1024, width=1024, steps=Non
     skipped = getattr(model, "sample_uncond_skip_layers", (22,))
     training = model.training
     model.eval()
-    def velocity(sigma, row, skip=()):
+    def velocity(x, sigma, row, skip=()):
         context = conditions.context[row:row+1]
         mask = conditions.attention_mask[row:row+1]
         if getattr(model, "moss_comfy_forward", False):
             from .comfy_forward import comfy_forward
-            return comfy_forward(model, latent.to(dtype), sigma.reshape(1),
+            return comfy_forward(model, x.to(dtype), sigma.reshape(1),
                 context[:, mask[0].bool()], skip_layers=skip).float()
-        return model(latent.to(dtype), (sigma * 1000).reshape(1), context, mask, skip_layers=skip).float()
+        return model(x.to(dtype), (sigma * 1000).reshape(1), context, mask, skip_layers=skip).float()
+    def denoise(x, sigma):
+        denoised = x - sigma * velocity(x, sigma, 0)
+        if cfg != 1:
+            uncond = x - sigma * velocity(x, sigma, 1, skipped)
+            denoised = uncond + (denoised - uncond) * cfg
+        return denoised
     try:
         if phase_callback:
             phase_callback("sample")
         with torch.autocast(device.type, dtype=dtype, enabled=dtype != torch.float32):
-            for index in range(len(sigmas) - 1):
-                sigma = sigmas[index]
-                denoised = latent - sigma * velocity(sigma, 0)
-                if cfg != 1:
-                    uncond = latent - sigma * velocity(sigma, 1, skipped)
-                    denoised = uncond + (denoised - uncond) * cfg
+            if sampler_name in ("dpmpp_sde", "dpmpp_sde_gpu"):
+                from training.inference_samplers import build_inference_sampler
+                callback = None
                 if step_callback:
-                    step_callback(index, len(sigmas) - 1, unpatchify_latents(denoised).unsqueeze(2))
-                pred = (latent - denoised) / sigma
-                latent = euler_step(latent, pred, sigmas, index)
+                    callback = lambda i, total, x0: step_callback(i, total, unpatchify_latents(x0).unsqueeze(2))
+                latent = build_inference_sampler(sampler_name)(
+                    denoise, latent, sigmas, seed=used_seed,
+                    shift=getattr(model, "sample_flow_shift", 5.0), step_callback=callback,
+                )
+            else:
+                for index in range(len(sigmas) - 1):
+                    sigma = sigmas[index]
+                    denoised = denoise(latent, sigma)
+                    if step_callback:
+                        step_callback(index, len(sigmas) - 1, unpatchify_latents(denoised).unsqueeze(2))
+                    pred = (latent - denoised) / sigma
+                    latent = euler_step(latent, pred, sigmas, index)
         if phase_callback:
             phase_callback("decode")
         pixels = vae.decode(unpatchify_latents(latent).unsqueeze(2))[0, :, 0].float().clamp(-1, 1)

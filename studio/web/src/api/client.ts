@@ -1972,6 +1972,12 @@ export interface Task {
   is_resumable?: boolean
   /** _v20 -- user-written task note (written via right-click on the queue page / edited on the detail page). Empty = null. */
   note?: string | null
+  /** _v23 -- times the supervisor restarted this task after a crash (total). */
+  auto_restarts?: number | null
+  /** _v23 -- restarts in a row without a newer recovery point (capped by crash_auto_restarts). */
+  auto_restart_streak?: number | null
+  /** _v23 -- exit code + log tail of the latest crash that triggered a restart. */
+  last_crash_msg?: string | null
 }
 
 /** One row of GET /api/queue/{id}/samples -- a training sample image (found by scanning disk, includes finished tasks). */

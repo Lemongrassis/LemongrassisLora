@@ -94,7 +94,7 @@ Empirically, per the Lion paper (Chen et al. 2023, [arxiv 2302.06675](https://ar
 
 **Why**: Lion's update is a fixed-size `sign()` step (`±lr`), unlike AdamW which scales by gradient magnitude. The same lr takes a much bigger step in Lion, so it needs to be lowered. Since the decoupled weight-decay update multiplies by lr, lowering lr means wd needs to go up to maintain the same effective decay strength.
 
-If you plug in AdamW's 1e-4 directly, loss will most likely diverge or stall early in training. AnimaLoraStudio's `create_lion` prints a warning when lr ≥ 1e-4 is detected.
+If you plug in AdamW's 1e-4 directly, loss will most likely diverge or stall early in training. LemongrassisLora's `create_lion` prints a warning when lr ≥ 1e-4 is detected.
 
 ## Automagic — must start at 1e-6
 

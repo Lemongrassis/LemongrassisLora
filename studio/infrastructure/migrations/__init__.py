@@ -37,6 +37,8 @@ from ._v19_legacy_jobs_freeze import migrate as _migrate_v19
 from ._v20_task_note import migrate as _migrate_v20
 from ._v21_project_kind import migrate as _migrate_v21
 from ._v22_version_datasets import migrate as _migrate_v22
+from ._v23_auto_restart import migrate as _migrate_v23
+from ._v24_krea2_comfy_cfg import migrate as _migrate_v24
 
 Migration = Callable[[sqlite3.Connection], None]
 
@@ -66,6 +68,8 @@ MIGRATIONS: list[Migration] = [
     _migrate_v20, # v20: tasks.note (queue task note, written via right-click, editable in the detail page)
     _migrate_v21, # v21: projects.kind ('lora' | 'edit' -- edit LoRA projects train on source/target pairs)
     _migrate_v22, # v22: version_datasets (shared datasets a version curates from; projects.kind gains 'dataset')
+    _migrate_v23, # v23: tasks.auto_restarts / auto_restart_streak / last_crash_msg (restart a training task after a crash)
+    _migrate_v24, # v24: Krea 2 generate history cfg moved to ComfyUI's scale (data only)
 ]
 
 

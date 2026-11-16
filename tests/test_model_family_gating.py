@@ -109,7 +109,7 @@ def test_default_config_valid_and_yaml_roundtrip():
     assert (krea2.sample_sampler_name, krea2.sample_scheduler) == (
         "euler", "simple",
     )
-    assert (krea2.sample_infer_steps, krea2.sample_cfg_scale) == (28, 4.5)
+    assert (krea2.sample_infer_steps, krea2.sample_cfg_scale) == (28, 5.5)
 
 
 
@@ -214,3 +214,17 @@ def test_prune_keeps_gated_fields_for_default_dump():
     for field in ("t5_tokenizer_path", "shuffle_caption", "keep_tokens",
                   "tag_dropout", "navit_packing", "leap_enabled", "sra_enabled"):
         assert field not in krea2, field
+
+
+def test_krea2_saved_cfg_moves_to_comfyui_scale_once():
+    # saved before Krea2 took ComfyUI's cfg: Krea guidance 4.5 / Turbo 0 -> cfg 5.5 / 1
+    old = TrainingConfig(model_family="krea2", sample_cfg_scale=4.5, sample_turbo_cfg=0.0)
+    assert (old.sample_cfg_scale, old.sample_turbo_cfg, old.sample_cfg_comfy) == (5.5, 1.0, True)
+    # reloading the migrated values keeps them
+    again = TrainingConfig(**old.model_dump())
+    assert (again.sample_cfg_scale, again.sample_turbo_cfg) == (5.5, 1.0)
+    # a fresh Krea2 config gets the ComfyUI defaults untouched
+    fresh = TrainingConfig(model_family="krea2")
+    assert (fresh.sample_cfg_scale, fresh.sample_turbo_cfg) == (5.5, 1.0)
+    # other families are left alone
+    assert TrainingConfig(model_family="anima", sample_cfg_scale=4.0).sample_cfg_scale == 4.0

@@ -1,4 +1,4 @@
-# AnimaStudio
+# LemongrassisLora
 
 Web workbench for the training pipeline (scrape -> curate -> tag -> regularize -> train -> sample test). Backend is FastAPI + SQLite, frontend is React + Vite.
 

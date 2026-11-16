@@ -34,13 +34,16 @@ class LogTailer:
         on_line: Callable[[str], None],
         *,
         poll_interval: float = 0.3,
+        start_offset: int = 0,
     ) -> None:
         self._path = path
         self._on_line = on_line
         self._poll = poll_interval
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self._offset = 0
+        # start_offset: skip what is already in the file (a log appended to
+        # across restarts must not replay the previous run's lines and events)
+        self._offset = max(0, int(start_offset))
         self._buffer = ""
 
     def start(self) -> None:

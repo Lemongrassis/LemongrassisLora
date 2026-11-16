@@ -177,8 +177,10 @@ def test_finishing_examples_creates_recommended_config(client):
     _upload(client, base, "source", ("a.png", _png((0, 0, 200))))
     assert client.post(f"{base}/advance-phase").json()["advanced"] is True
     cfg = client.get(f"{base}/config").json()["config"]
-    expected = {"edit_mode": True, "lora_rank": 32, "learning_rate": 2e-5, "optimizer_type": "adamw",
-                "epochs": 12, "grad_accum": 4, "resolution": [1024], "lr_scheduler": "cosine_with_warmup",
+    expected = {"edit_mode": True, "lora_rank": 128, "lora_alpha": 128.0, "lora_train_adaln": True,
+                "learning_rate": 2e-5, "optimizer_type": "adamw", "optimizer_args": ["betas=(0.9, 0.99)"],
+                "weight_decay": 0.01, "epochs": 24, "grad_accum": 4, "resolution": [1024, 512],
+                "lr_scheduler": "cosine_with_warmup",
                 "lr_scheduler_warmup_steps": 100, "shuffle_caption": False, "flip_augment": False,
                 "sample_prompt": "", "sample_prompts": []}
     assert {k: cfg[k] for k in expected} == expected
@@ -187,4 +189,4 @@ def test_finishing_examples_creates_recommended_config(client):
     # "Back to recommended" rewrites a changed config.
     client.put(f"{base}/config", json={**cfg, "lora_rank": 8, "epochs": 3})
     reset = client.post(f"{base}/pairs/recommended-config").json()["config"]
-    assert reset["lora_rank"] == 32 and reset["epochs"] == 12 and reset["edit_mode"] is True
+    assert reset["lora_rank"] == 128 and reset["epochs"] == 24 and reset["edit_mode"] is True

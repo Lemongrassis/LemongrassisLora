@@ -399,6 +399,7 @@ class OrthoLoRAAdapter:
             "ss_network_module": "lycoris.kohya",
             "ss_network_args": json.dumps(ss_args),
         }
+        meta.update(getattr(self, "metadata_card", None) or {})
         save_file(sd, str(path), metadata=meta)
         logger.info("OrthoLoRA saved to: %s (baked as plain LoRA)", path)
 

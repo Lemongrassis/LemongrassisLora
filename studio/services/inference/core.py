@@ -48,6 +48,8 @@ _DEFAULT_RANK = 32
 _DEFAULT_ALPHA = 16.0
 _DEFAULT_ALGO = "lokr"
 _DEFAULT_FACTOR = 8
+#: LoKr dim that forces LyCORIS full w1/w2 matrices ("full" dim in kohya metadata)
+_FULL_LOKR_RANK = 100000
 
 
 @dataclass
@@ -77,6 +79,10 @@ class LoRAMeta:
     algo: str
     factor: int
     weight_decompose: bool = False
+    #: DoRA magnitude axis ("output" / "input"); read from dora_scale's shape.
+    dora_axis: str = "output"
+    #: How the DoRA rescale was computed in training ("lycoris" / "comfyui_bf16").
+    dora_compute: str = "lycoris"
     rs_lora: bool = False
     lora_reg_dims: Optional[dict[str, int]] = None
     #: The model family this artifact belongs to (D13 tag); untagged legacy
@@ -89,6 +95,8 @@ class LoRAMeta:
     #: key-matching check done during injection/merge.
     family_explicit: bool = False
     has_text_encoder: bool = False
+    #: Anima adaLN modulation layers are adapted (changes the injected layer set)
+    has_adaln: bool = False
 
 
 def read_lora_meta(path: str) -> LoRAMeta:
@@ -106,7 +114,17 @@ def read_lora_meta(path: str) -> LoRAMeta:
     try:
         with safe_open(str(path), framework="pt", device="cpu") as f:
             meta = f.metadata() or {}
-            has_text_encoder = any(key.startswith("lora_te_") for key in f.keys())
+            keys = list(f.keys())
+            has_text_encoder = any(key.startswith("lora_te_") for key in keys)
+            has_adaln = any("adaln_modulation_" in key for key in keys)
+            # DoRA and its axis are read from the tensors: other trainers' files
+            # (e.g. "dora": true / dora_axis in their own metadata) carry no
+            # weight_decompose flag. dora_scale is [1, in] on the input axis.
+            dora_key = next((key for key in keys if key.endswith(".dora_scale")), None)
+            dora_shape = tuple(f.get_slice(dora_key).get_shape()) if dora_key else None
+            # LoKr saved with full matrices (lokr_w2, no lokr_w2_a/b): dim "full"
+            lokr_full = (any(key.endswith(".lokr_w2") for key in keys)
+                         and not any(key.endswith(".lokr_w2_a") for key in keys))
     except Exception as e:
         logger.warning(f"Failed to read LoRA metadata {path}: {e}; using default parameters")
         return LoRAMeta(_DEFAULT_RANK, _DEFAULT_ALPHA, _DEFAULT_ALGO, _DEFAULT_FACTOR)
@@ -124,6 +142,10 @@ def read_lora_meta(path: str) -> LoRAMeta:
             rank = int(meta["ss_network_dim"])
         except (ValueError, TypeError):
             pass
+    if lokr_full:
+        # Any dim at least half the largest Kronecker block makes LyCORIS build
+        # full w1/w2 (alpha is then ignored), matching the file's shapes.
+        rank = max(rank, _FULL_LOKR_RANK)
 
     # The common convention when alpha isn't explicit is alpha=rank (keeps a 1.0x multiplier)
     alpha = float(rank)
@@ -141,7 +163,18 @@ def read_lora_meta(path: str) -> LoRAMeta:
         except (ValueError, TypeError):
             pass
 
-    weight_decompose = bool(ss_args.get("weight_decompose", False))
+    weight_decompose = bool(ss_args.get("weight_decompose", False)) or dora_shape is not None
+    dora_axis = str(ss_args.get("dora_axis") or "output")
+    if dora_shape is not None and len(dora_shape) == 2:
+        dora_axis = "input" if dora_shape[0] == 1 and dora_shape[1] > 1 else "output"
+    dora_compute = str(ss_args.get("dora_compute") or "lycoris")
+    try:
+        # YPuddin trainer: {"mode": "comfyui", "precisions": [["input", "bfloat16", "bfloat16"]]}
+        ext = json.loads(meta.get("ypuddin.dora_compute", "null"))
+        if isinstance(ext, dict) and ext.get("mode") == "comfyui":
+            dora_compute = "comfyui_bf16"
+    except (ValueError, TypeError):
+        pass
     rs_lora = bool(ss_args.get("rs_lora", False))
 
     # lora_reg_dims: training overrides some layers' rank via regex; inference must
@@ -165,11 +198,14 @@ def read_lora_meta(path: str) -> LoRAMeta:
         algo=algo,
         factor=factor,
         weight_decompose=weight_decompose,
+        dora_axis=dora_axis,
+        dora_compute=dora_compute if weight_decompose else "lycoris",
         rs_lora=rs_lora,
         lora_reg_dims=lora_reg_dims,
         model_family=str(ss_args.get("model_family") or "anima"),
         family_explicit=bool(ss_args.get("model_family")),
         has_text_encoder=has_text_encoder,
+        has_adaln=has_adaln,
     )
 
 
@@ -177,6 +213,9 @@ _PEFT_LORA_PREFIX = "diffusion_model."
 _PEFT_SUFFIX_MAP = {
     "lora_A.weight": "lora_down.weight",
     "lora_B.weight": "lora_up.weight",
+    # Same prefix with kohya factor names (MOSS-Image-Base-8-steps-dmd)
+    "lora_down.weight": "lora_down.weight",
+    "lora_up.weight": "lora_up.weight",
     "alpha": "alpha",
 }
 
@@ -187,8 +226,8 @@ def _normalize_peft_lora_sd(
     """Normalize PEFT/comfy key format (the civitai ecosystem's) to the
     kohya/lycoris convention.
 
-    ``diffusion_model.{dotted layer name}.lora_A/lora_B`` -> ``lora_unet_{layer
-    name with underscores}.lora_down/lora_up.weight``; a missing alpha key means
+    ``diffusion_model.{dotted layer name}.lora_A/lora_B`` (or ``lora_down/lora_up``)
+    -> ``lora_unet_{layer name with underscores}.lora_down/lora_up.weight``; a missing alpha key means
     comfy's 1.0-scale semantics, so we fill in a per-layer ``alpha = rank`` (an
     alpha/rank-style loader then gets 1.0, matching the numeric value); rank is
     inferred from the lora_A tensor shape (these files have no ss_* metadata, so
@@ -249,6 +288,7 @@ def apply_loras(
     dtype: Any,
     family_id: str = "anima",
     *, text_stack: Any = None,
+    int8_keep_backup: bool = True,
 ) -> list[Any]:
     """Inject a separate AnimaLycorisAdapter for each LoRA; forward-time hooks
     accumulate the deltas.
@@ -262,6 +302,10 @@ def apply_loras(
       - LycorisNetwork.multiplier is the global multiplier read at forward time
       - a per-lora-module fallback is also set (different lycoris versions read
         it from different places)
+
+    ``int8_keep_backup``: an int8 base merge keeps a CPU copy of the original
+    weights so a LoRA change can restore in place; False skips that copy (the
+    daemon then reloads the DiT on a LoRA change), used when RAM is tight.
 
     Returns the adapter list -- the caller **must keep a reference** to it,
     otherwise once Python's GC runs, the LycorisNetwork inside each
@@ -282,7 +326,9 @@ def apply_loras(
     if specs:
         from training.families.krea2.quant_fp8 import model_has_fp8_layers  # noqa: PLC0415
 
-        fp8_merge = family_id == "krea2" and model_has_fp8_layers(model)
+        # mxfp8 / plain int8 bases keep the LoRA as a bypass branch (no merge path)
+        fp8_merge = (family_id == "krea2" and model_has_fp8_layers(model)
+                     and not getattr(model, "lora_bypass_only", False))
 
     merge_sources: list[tuple[dict, float, str]] = []
     # Detachable hooks that live beside a merged base (MOSS per-block modulation)
@@ -378,6 +424,8 @@ def apply_loras(
             alpha=alpha,
             factor=meta.factor,
             weight_decompose=meta.weight_decompose,
+            dora_axis=meta.dora_axis,
+            dora_compute=meta.dora_compute,
             rs_lora=meta.rs_lora,
             lora_reg_dims=reg_dims,
         )
@@ -444,7 +492,10 @@ def apply_loras(
                 from training.families.moss_image.lora_int8_merge import merge_loras_into_int8_model
             else:
                 from training.families.lora_int8_merge import merge_loras_into_int8_model
-            return [merge_loras_into_int8_model(model, merge_sources), *extra_handles]
+            return [
+                merge_loras_into_int8_model(model, merge_sources, keep_backup=int8_keep_backup),
+                *extra_handles,
+            ]
         from training.families.krea2.lora_fp8_merge import (  # noqa: PLC0415
             merge_loras_into_fp8_model,
         )

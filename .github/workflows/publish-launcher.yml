@@ -1,6 +1,6 @@
 name: publish-launcher
 
-# Builds the Windows `AnimaLoraStudio.exe` and **commits it back to the repo**.
+# Builds the Windows `LemongrassisLora.exe` and **commits it back to the repo**.
 #
 # Why the exe goes into git (binaries usually shouldn't): this fork's target users are
 # people who "clone it and want to double-click it right away." Making them first dig
@@ -58,15 +58,15 @@ jobs:
       # gets a "double-click does nothing" experience while the repo looks perfectly fine.
       - name: Smoke test
         run: |
-          Copy-Item dist\AnimaLoraStudio.exe .\AnimaLoraStudio.exe -Force
-          .\AnimaLoraStudio.exe --check
+          Copy-Item dist\LemongrassisLora.exe .\LemongrassisLora.exe -Force
+          .\LemongrassisLora.exe --check
 
       - name: Commit
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f AnimaLoraStudio.exe
+          git add -f LemongrassisLora.exe
           # PyInstaller's output differs byte-for-byte every time (timestamps etc.), so
           # "there's a diff" can't be used to decide whether committing is meaningful —
           # --quiet here is only to skip the (theoretically impossible) case where
@@ -75,7 +75,7 @@ jobs:
             echo "nothing to commit"
             exit 0
           fi
-          git commit -m "chore(launcher): rebuild AnimaLoraStudio.exe
+          git commit -m "chore(launcher): rebuild LemongrassisLora.exe
 
           Built from tools/launcher.py by .github/workflows/publish-launcher.yml
           on a windows runner (PyInstaller cannot cross-compile). Smoke-tested

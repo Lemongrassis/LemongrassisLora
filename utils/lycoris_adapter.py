@@ -117,6 +117,8 @@ class LycorisAdapter:
         rank_dropout: float = 0.0,
         module_dropout: float = 0.0,
         weight_decompose: bool = False,
+        dora_axis: str = "output",
+        dora_compute: str = "lycoris",
         rs_lora: bool = False,
         lora_reg_dims: Optional[dict[str, int]] = None,
         tlora_min_rank: int = 8,
@@ -134,6 +136,15 @@ class LycorisAdapter:
         self.rank_dropout = rank_dropout
         self.module_dropout = module_dropout
         self.weight_decompose = weight_decompose
+        # DoRA magnitude axis: "output" (LyCORIS default, per output row) or "input"
+        # (per input column, wd_on_out=False); ComfyUI detects it from dora_scale's shape.
+        if dora_axis not in {"output", "input"}:
+            raise ValueError(f"dora_axis must be 'output' or 'input', got {dora_axis!r}")
+        from utils.dora_compute import DORA_COMPUTE_MODES
+        if dora_compute not in DORA_COMPUTE_MODES:
+            raise ValueError(f"dora_compute must be one of {DORA_COMPUTE_MODES}, got {dora_compute!r}")
+        self.dora_axis = dora_axis
+        self.dora_compute = dora_compute
         self.rs_lora = rs_lora
         self.train_norm = train_norm
         self.norms = None
@@ -209,14 +220,16 @@ class LycorisAdapter:
 
         # extra kwargs: only pass the corresponding field when the algorithm supports it
         extra: dict[str, Any] = {}
-        if getattr(model, "is_convrot_int8", False) or getattr(model, "is_qfloat8", False):
+        if (getattr(model, "is_convrot_int8", False) or getattr(model, "is_qfloat8", False)
+                or getattr(model, "lora_bypass_only", False)):
             if self.weight_decompose:
-                raise ValueError("DoRA requires unquantized base weights; disable it for ConvRot INT8 / qfloat8")
+                raise ValueError("DoRA requires unquantized base weights; disable it for INT8 / qfloat8 / mxfp8")
             extra["bypass_mode"] = True
         if self.algo == "lokr":
             extra["factor"] = self.factor
         if self.weight_decompose:
             extra["weight_decompose"] = True
+            extra["wd_on_out"] = self.dora_axis == "output"
         if self.rs_lora:
             extra["rs_lora"] = True
 
@@ -298,7 +311,17 @@ class LycorisAdapter:
                 (p.dtype for p in model.parameters() if p.dtype in _ADAPTER_DTYPES),
                 torch.float32,
             )
+            # FP32 masters keep Adam updates smaller than a bf16 weight's rounding step;
+            # the bypass forward casts the weights to the activation dtype.
+            self._save_dtype = adapter_dtype if getattr(self, "fp32_weights", False) else None
+            if self._save_dtype is not None:
+                adapter_dtype = torch.float32
             self.network.to(device=ref.device, dtype=adapter_dtype)
+
+        if self.weight_decompose and self.dora_compute == "comfyui_bf16":
+            from utils.dora_compute import install_comfy_dora
+            switched = install_comfy_dora(self.network, reinit=True)
+            logger.info("DoRA (%s axis) computed as ComfyUI does in BF16 on %d layers", self.dora_axis, switched)
 
         # LycorisNetwork is a standalone nn.Module, not part of the model's submodule tree;
         # model.eval()/.train() doesn't cascade to the lycoris module (self.training stays
@@ -361,7 +384,7 @@ class LycorisAdapter:
             preset=text_preset, algo=self.algo, rank=self.rank, alpha=self.alpha,
             factor=self.factor, dropout=self.dropout, rank_dropout=self.rank_dropout,
             module_dropout=self.module_dropout, weight_decompose=self.weight_decompose,
-            rs_lora=self.rs_lora,
+            dora_axis=self.dora_axis, dora_compute=self.dora_compute, rs_lora=self.rs_lora,
         )
         layers = child.inject(target)
         if not layers:
@@ -647,6 +670,16 @@ class LycorisAdapter:
         if self.network is None:
             return [{"params": [], "weight_decay": weight_decay}]
 
+        # LoRA+ style: lora_up gets its own, higher LR (the optimizer's base LR stays on lora_down)
+        up_multiplier = float(getattr(self, "up_lr_multiplier", 1.0) or 1.0)
+        if up_multiplier != 1.0 and self.algo == "lora":
+            up = [p for name, p in self.network.named_parameters() if p.requires_grad and "lora_up" in name]
+            up_ids = {id(p) for p in up}
+            return [
+                {"params": [p for p in self._main_params() if id(p) not in up_ids], "weight_decay": weight_decay},
+                {"params": up, "weight_decay": weight_decay, "lr": float(self.up_base_lr) * up_multiplier},
+            ]
+
         if not self.use_lokr or weight_decay == 0:
             return [{"params": self._main_params(), "weight_decay": weight_decay}]
 
@@ -750,6 +783,9 @@ class LycorisAdapter:
             "train_norm": self.train_norm,
             "train_text_encoder": self.text_adapter is not None,
         }
+        if self.weight_decompose:
+            ss_args["dora_axis"] = self.dora_axis
+            ss_args["dora_compute"] = self.dora_compute
         if self.lora_reg_dims:
             ss_args["lora_reg_dims"] = self.lora_reg_dims
         # Multi-model D13: family marker (injected by phases/models via
@@ -767,6 +803,12 @@ class LycorisAdapter:
             meta["ss_train_norm_export_format"] = "comfyui_diff"
         if self.text_adapter is not None:
             meta["ss_text_encoder_lr"] = str(self.text_encoder_lr)
+        # LemongrassisLora card (runtime/training/lora_card.py), informational only
+        meta.update(getattr(self, "metadata_card", None) or {})
+        # FP32 training still exports the usual file precision (training states keep FP32)
+        save_dtype = getattr(self, "_save_dtype", None)
+        if save_dtype is not None:
+            sd = {key: value.to(save_dtype) if value.is_floating_point() else value for key, value in sd.items()}
         save_file(sd, str(path), metadata=meta)
         logger.info(f"LoRA saved to: {path}")
 

@@ -1,6 +1,6 @@
 <div align="center">
 
-# AnimaTrainHub
+# LemongrassisLora
 
 **A local studio for training LoRA / LoKr adapters for Anima and Krea 2.**<br>
 From raw images to test renders in a single browser window, including from your phone.
@@ -169,7 +169,7 @@ Nothing is opened on your router. The link carries a persistent access key, and 
 ## Differences from upstream
 
 > [!NOTE]
-> AnimaTrainHub started as a fork of [WalkingMeatAxolotl/AnimaLoraStudio](https://github.com/WalkingMeatAxolotl/AnimaLoraStudio). The training core and backend are synced with upstream **v0.20.2**. Everything a person actually touches is reworked.
+> LemongrassisLora started as a fork of [WalkingMeatAxolotl/AnimaLoraStudio](https://github.com/WalkingMeatAxolotl/AnimaLoraStudio). The training core and backend are synced with upstream **v0.20.2**. Everything a person actually touches is reworked.
 
 <table>
 <tr>
@@ -238,11 +238,11 @@ Runtime mode chosen on first launch: binding, browser and data location follow i
 ### 2 · Launch
 
 ```bash
-git clone https://github.com/DualChimerra/AnimaTrainHub
-cd AnimaTrainHub
+git clone https://github.com/Lemongrassis/LemongrassisLora
+cd LemongrassisLora
 ```
 
-**Windows**: `AnimaLoraStudio.exe` or `studio.bat`<br>
+**Windows**: `LemongrassisLora.exe` or `studio.bat`<br>
 **Linux / macOS**: `./studio.sh`
 
 </td>
@@ -308,7 +308,7 @@ python -m studio test         # pytest + vitest
 
 studio.bat --torch=cu128      # force a specific PyTorch build
 studio.bat --reinstall        # recreate venv (studio_data is kept)
-AnimaLoraStudio.exe --check   # diagnostics: Python, venv, GPU, cache paths
+LemongrassisLora.exe --check   # diagnostics: Python, venv, GPU, cache paths
 
 python tools/download_models.py                  # every model from HuggingFace
 python tools/download_models.py --modelscope     # via ModelScope
@@ -393,7 +393,7 @@ Captions and tags, regularization, optimizers, training parameters, custom model
 <summary><b>Repository layout</b></summary>
 
 ```
-AnimaTrainHub/
+LemongrassisLora/
 ├── runtime/        # training core, generation, inference daemon (usable from the CLI)
 ├── studio/         # web studio: FastAPI (api / services / domain / infrastructure / workers)
 │   └── web/        # UI: React + Vite + Tailwind
@@ -430,7 +430,7 @@ Code: **GPL-3.0** ([LICENSE](LICENSE)). Some third-party components (NVIDIA Cosm
 
 <div align="center">
 
-**AnimaTrainHub** · made for people who train LoRAs, not for people who read training scripts
+**LemongrassisLora** · made for people who train LoRAs, not for people who read training scripts
 
 <sub>Screenshots use demo data.</sub>
 

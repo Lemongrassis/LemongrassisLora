@@ -33,7 +33,7 @@ const initialServerState = {
         id: 'default',
         label: 'Default',
         api_key: '',
-        project: 'AnimaLoraStudio',
+        project: 'LemongrassisLora',
         entity: '',
         base_url: '',
         mode: 'online',

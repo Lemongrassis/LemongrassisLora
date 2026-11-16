@@ -41,6 +41,7 @@ def test_is_distilled_path_by_official_variant():
     krea2 = get_assets("krea2")
     assert krea2.is_distilled_path("G:/models/diffusion_models/krea2-turbo-bf16.safetensors")
     assert krea2.is_distilled_path("G:/models/diffusion_models/krea2-turbo-fp8-scaled.safetensors")
+    assert krea2.is_distilled_path("G:/ComfyUI/models/diffusion_models/krea2_turbo_int8_convrot.safetensors")
     assert not krea2.is_distilled_path("G:/models/diffusion_models/krea2-raw-bf16.safetensors")
     assert not krea2.is_distilled_path("G:/models/diffusion_models/krea2-raw-fp8-scaled.safetensors")
     assert not krea2.is_distilled_path("G:/models/my-community-turbo-mix.safetensors")

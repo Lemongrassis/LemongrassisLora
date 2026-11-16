@@ -12,7 +12,12 @@ import logging
 from pathlib import Path
 
 from training.context import TrainingContext
-from training.text_cache import TEXT_CACHE_FORMAT_VERSION, TextCacheEntry, text_cache_key
+from training.text_cache import (
+    TEXT_CACHE_FORMAT_VERSION,
+    TextCacheEntry,
+    caption_variant_sidecar_path,
+    text_cache_key,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -36,10 +41,11 @@ def _image_dataset(dataset):
     return None
 
 
-def _entry_for(ctx: TrainingContext, image: Path, caption: str) -> TextCacheEntry:
+def _entry_for(ctx: TrainingContext, image: Path, caption: str, *, variant: bool = False) -> TextCacheEntry:
     """Sidecar next to the image, or -- for an image from a shared dataset -- a
     caption-addressed file in that dataset's cache folder (same caption + same
-    text encoder = same file, whichever training wrote it)."""
+    text encoder = same file, whichever training wrote it). A caption variation
+    gets its own sidecar, since one image then has several."""
 
     router = getattr(ctx, "shared_cache", None)
     if router is not None:
@@ -61,6 +67,9 @@ def _entry_for(ctx: TrainingContext, image: Path, caption: str) -> TextCacheEntr
                 "family": ctx.family.spec.family_id,
             })
             return TextCacheEntry(image_path=image, caption=caption, cache_path=path)
+    if variant:
+        return TextCacheEntry(image_path=image, caption=caption,
+                              cache_path=caption_variant_sidecar_path(image, caption))
     return TextCacheEntry.for_image(image, caption)
 
 
@@ -68,13 +77,19 @@ def _collect_entries(ctx: TrainingContext) -> list[TextCacheEntry]:
     """Dedup main + regularization sets by image; resolution fan-out/repeat never re-encodes text."""
 
     by_image: dict[str, TextCacheEntry] = {}
+    variants: dict[tuple[str, str], TextCacheEntry] = {}
     for dataset in (ctx.base_dataset, ctx.reg_dataset):
         base = _image_dataset(dataset)
         if base is None:
             continue
         for sample in base.samples:
             image = Path(sample["image"])
-            caption = base.caption_for_sample(sample)
+            captions = base.caption_variants_for_sample(sample)
+            if len(captions) > 1:
+                for caption in captions:
+                    variants.setdefault((str(image), caption), _entry_for(ctx, image, caption, variant=True))
+                continue
+            caption = captions[0]
             key = str(image)
             existing = by_image.get(key)
             if existing is not None:
@@ -84,7 +99,7 @@ def _collect_entries(ctx: TrainingContext) -> list[TextCacheEntry]:
                     )
                 continue
             by_image[key] = _entry_for(ctx, image, caption)
-    return list(by_image.values())
+    return [*by_image.values(), *variants.values()]
 
 
 def _extra_prompts(args) -> list[str]:

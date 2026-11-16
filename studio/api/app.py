@@ -58,7 +58,7 @@ from .routers.queue import io as queue_io_router
 from .routers.queue import lifecycle as queue_lifecycle
 from .routers.queue import outputs as queue_outputs
 
-app = FastAPI(title="AnimaTrainHub", version=__version__, lifespan=lifespan)
+app = FastAPI(title="LemongrassisLora", version=__version__, lifespan=lifespan)
 # Middleware registration order: in starlette, a middleware registered later
 # sits on the outer layer of the stack. TraceIdMiddleware is registered
 # first -> it ends up wrapping around GZip -> trace_id is bound before GZip
