@@ -1,17 +1,19 @@
 <div align="center">
 
+<img src="studio/web/public/icons/noal.png" alt="LemongrassisLora mascot" width="120">
+
 # LemongrassisLora
 
-**A local studio for training LoRA / LoKr adapters for Anima and Krea 2.**<br>
-From raw images to test renders in a single browser window, including from your phone.
+**A local web studio for training LoRA / LoKr adapters for Anima, Krea 2 and MOSS Image.**<br>
+From raw images to test renders in one browser window — on your PC, in Colab or from your phone.
 
 [![Русский](https://img.shields.io/badge/lang-Русский-18181b?style=flat-square)](README.ru.md)
-[![Version](https://img.shields.io/badge/version-0.20.2--fork-6366f1?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.20.2--fork-84cc16?style=flat-square)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-GPL--3.0-52525b?style=flat-square)](LICENSE)
-[![GPU](https://img.shields.io/badge/NVIDIA-6%20GB+-52525b?style=flat-square)](#requirements)
-[![UI](https://img.shields.io/badge/UI-EN%20·%20RU-52525b?style=flat-square)](#)
+[![Models](https://img.shields.io/badge/models-Anima%20·%20Krea%202%20·%20MOSS-52525b?style=flat-square)](#-supported-models)
+[![GPU](https://img.shields.io/badge/NVIDIA-6%20GB+-52525b?style=flat-square)](#-requirements)
 
-[Features](#features) · [Differences from upstream](#differences-from-upstream) · [Quick start](#quick-start) · [From your phone](#from-your-phone) · [Documentation](#documentation)
+[Why](#-why-lemongrassislora) · [Models](#-supported-models) · [Quick start](#-quick-start) · [Features](#-features) · [Docs](#-documentation)
 
 <br>
 
@@ -21,34 +23,34 @@ From raw images to test renders in a single browser window, including from your 
 
 <br>
 
-## At a glance
+## ✿ Why LemongrassisLora
 
 <table>
 <tr>
 <td width="50%" valign="top">
 
 **🧭 The whole cycle in one place**<br>
-Dataset → curation → preprocess → tags → reg set → training → queue → monitor → generation. The current step is highlighted in the sidebar and configs save themselves.
+Dataset → curation → preprocess → tags → reg set → training → queue → generation. The sidebar shows where you are, configs save themselves.
 
 </td>
 <td width="50%" valign="top">
 
 **📖 Every setting explains itself**<br>
-All 182 training options carry a plain-language description and a recommended value, in English or Russian: hover the setting name to see it.
+Each training option has a plain-language description and a recommended value, in English or Russian. Hover the name to read it.
 
 </td>
 </tr>
 <tr>
 <td valign="top">
 
-**📱 Works from your phone at a permanent link**<br>
-Tailscale Funnel or ngrok give you an address that never changes. The "open on startup" checkbox brings the link up by itself, and every page is laid out for a phone.
+**🪶 Fits ordinary GPUs**<br>
+Block swap, fp8 / INT8 bases, latent and text caches, NaViT packing. Before you start you see the step count, the time and whether it fits in VRAM.
 
 </td>
 <td valign="top">
 
-**🪶 Trains on 6 GB**<br>
-Block swap, fp8, latent and text-encoder caches, NaViT packing. Before you start you see the step count, the expected time and whether it fits in VRAM.
+**📱 Works from your phone**<br>
+A permanent link through Tailscale Funnel or ngrok, protected by an access key. Every page is laid out for a phone.
 
 </td>
 </tr>
@@ -56,170 +58,19 @@ Block swap, fp8, latent and text-encoder caches, NaViT packing. Before you start
 
 <br>
 
-## A quick tour
+## ✿ Supported models
 
-<table>
-<tr>
-<td width="50%" valign="top">
-<img src="docs/images/overview-en.png" alt="Project overview" width="100%"><br>
-<b>Project overview</b> · The pipeline of the active version, KPIs, tasks and versions on one page.
-</td>
-<td width="50%" valign="top">
-<img src="docs/images/dataset-en.png" alt="Dataset" width="100%"><br>
-<b>Dataset</b> · Drag & drop or Booru scrape, with format and size stats.
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-<img src="docs/images/curate-en.png" alt="Curation" width="100%"><br>
-<b>Curation</b> · Dataset → train set, concept folders with repeats, validation set.
-</td>
-<td width="50%" valign="top">
-<img src="docs/images/train-en.png" alt="Train" width="100%"><br>
-<b>Train</b> · Config with a hover tip on every setting, step budget and a live preview.
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-<img src="docs/images/task-en.png" alt="Task" width="100%"><br>
-<b>Task</b> · Loss and LR curves, samples per epoch, logs and outputs.
-</td>
-<td width="50%" valign="top">
-<img src="docs/images/queue-en.png" alt="Queue" width="100%"><br>
-<b>Queue</b> · One GPU slot, a timeline to the end of the queue, pause and resume.
-</td>
-</tr>
-</table>
+| Model | Size | Text encoder | Trains on | Guide |
+|---|---|---|---|---|
+| [**Anima**](https://huggingface.co/circlestone-labs/Anima) (incl. 2.9B) | Cosmos-Predict2 DiT, 2B | Qwen3-0.6B | 6 GB+ with block swap | [captions](docs/user-guide/caption-format.md) |
+| **Krea 2** (Raw, Turbo previews) | single-stream MMDiT, 12.9B | Qwen3-VL-4B | 12 GB+ with INT8 / fp8 and block swap | [optimizers](docs/user-guide/optimizers.md) |
+| [**MOSS Image**](https://huggingface.co/OpenMOSS-Team/MOSS-Image-Base) (Base) | 5B | Qwen3.5-9B | 12 GB+ with ConvRot INT8 and offloading | [MOSS guide](docs/user-guide/moss-image.md) |
+
+All three train **LoRA, LoKr and LoHa**. Outputs are plain `lora_unet_*` files that load into ComfyUI as they are.
 
 <br>
 
-## Features
-
-### 🗂 Dataset
-- **Import** images and zip archives by drag & drop or from the server's disk, scrape Booru, see format and size stats.
-- **Curation**: a two-pane "dataset → train" view, `N_name` concept folders with repeats, a separate validation set.
-- **Preprocess** *(optional)*: perceptual-hash duplicate review, upscaling (ESRGAN / Real-ESRGAN), cropping with aspect-ratio clustering, inpainting. Every action can be undone.
-- **Tag editor**: bulk add / remove / replace, dedupe, tag distribution, dictionary autocomplete, restore points.
-- **Regularization set**: generated by the base model (DreamBooth-style prior) or pulled from Booru based on the train set's tag distribution.
-
-### 🎛 Training
-- **Projects and versions**: one dataset, many versions, each with its own config, reg set and outputs.
-- **Two-way presets**: save a version's config as a global preset, or pull a preset into a version.
-- **Config form**: Simple / Advanced modes, section index, YAML preview, autosave.
-- **An honest estimate before you start**: step count, expected time (measured from your own last run) and a VRAM check using the same arithmetic as the OOM guard.
-- **GPU queue**: pause with progress saved, resume, hold the queue, schedule a start.
-- **Monitoring**: loss / LR curves, per-step samples, logs, output files with a zip export.
-
-<img src="docs/images/task-en.png" alt="Task page: progress, loss and learning rate, samples per epoch" width="100%">
-
-### 🧪 Algorithms
-| | |
-|---|---|
-| **Adapters** | LoRA and LyCORIS (LoKr / LoHa, DoRA, rs-LoRA, dropout), per-layer ranks via `lora_rank_rules` |
-| **Optimizers** | AdamW, Lion, Automagic, Prodigy, Prodigy + ScheduleFree ([how to choose](docs/user-guide/optimizers.md)) |
-| **Loss** | MSE / Huber with `min_snr`, `cosmap`, `detail_inv_t` weighting and more |
-| **Timesteps** | `uniform`, `logit_normal`, `mode`, `mixed_uniform`, InfoNoise, Style-Friendly SNR ([details](docs/style-friendly-snr.md)) |
-| **Against overfitting** | EMA of the adapter weights and DOP, differential output preservation ([details](docs/ema-and-dop.md)) |
-| **Memory** | block swap (Anima from 6 GB, Krea 2 on 16 GB), fp8, caches, NaViT packing ([details](docs/navit-packing.md)) |
-| **Attention** | xformers / flash-attn / PyTorch SDPA |
-
-### 🎨 Generation and comparison
-- Single images and XY matrices over parameters, served by a persistent daemon.
-- Prompts straight from dataset captions, several LoRAs with individual weights.
-- **Checkpoint soup**: average several epochs or runs into one file and test it right away. Incompatible checkpoints are refused up front with the reason.
-
-### ⚙️ Environment
-- The first launch creates a `venv`, picks a PyTorch build for your driver (cu118–cu130) and installs dependencies.
-- All caches (pip, HuggingFace, torch, npm) stay inside the project folder.
-- One-click model downloads (HuggingFace, your own mirror or ModelScope), custom VAEs and text encoders, local base models.
-- **Local** and **Colab** modes, English and Russian UI, command palette on `Ctrl + K`.
-
-Outputs are saved as `lora_unet_*` and load into ComfyUI without conversion.
-
-<br>
-
-## From your phone
-
-Every page is laid out for a phone: columns stack, the monitor takes the full width, crop handles and thumbnail checkboxes work with a finger.
-
-<table>
-<tr>
-<td valign="top">
-
-**Settings → Remote access**
-
-| Provider | Address | What you need |
-|---|---|---|
-| **Tailscale Funnel** | permanent `https://<computer>.<tailnet>.ts.net` | Tailscale on this computer, sign in once |
-| **ngrok** | permanent, on the free static domain | authtoken and domain from the ngrok dashboard |
-| **Cloudflare** | new on every start | nothing |
-
-1. Pick a provider. Tailscale is the easiest way to get a permanent link.
-2. Press **Open link**. On the first start Tailscale may ask you to allow Funnel; the link to do that appears right in the panel.
-3. Turn on **Open the link when the studio starts** and bookmark the link on your phone.
-
-Nothing is opened on your router. The link carries a persistent access key, and the studio does not answer without it. If the link leaks, **New access key** revokes every old one.
-
-</td>
-</tr>
-</table>
-
-<br>
-
-## Differences from upstream
-
-> [!NOTE]
-> LemongrassisLora started as a fork of [WalkingMeatAxolotl/AnimaLoraStudio](https://github.com/WalkingMeatAxolotl/AnimaLoraStudio). The training core and backend are synced with upstream **v0.20.2**. Everything a person actually touches is reworked.
-
-<table>
-<tr>
-<td width="33%" valign="top">
-
-**🎨 Interface**<br>
-New design, ported page by page from an approved mockup: warm neutrals, a lime accent, Geist type. Every setting explains itself on hover. Fully in English and Russian.
-
-</td>
-<td width="33%" valign="top">
-
-**📖 Explanations**<br>
-Every setting has a plain description and a recommended starting value.
-
-</td>
-<td width="33%" valign="top">
-
-**⏱ Honest estimate**<br>
-Steps, time and VRAM are shown before you press Start.
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-**📱 Phone + remote access**<br>
-Phone layout on every page and a permanent link with autostart and an access key.
-
-</td>
-<td valign="top">
-
-**🧪 Training toolbox**<br>
-Checkpoint soup, EMA, DOP with a trigger-word field, Style-Friendly SNR.
-
-</td>
-<td valign="top">
-
-**☁️ Local / Colab**<br>
-Runtime mode chosen on first launch: binding, browser and data location follow it.
-
-</td>
-</tr>
-</table>
-
-**Backported from upstream v0.21–v0.25:** training-side block swap (Krea 2 on 16 GB, Anima on 6 GB), fixes for memory leaks and spurious OOMs; NaViT packing now works together with block swap.<br>
-**Not backported:** generation-side block swap, the v0.22 evaluation page rework, GPU selection on multi-GPU machines.
-
-<br>
-
-## Quick start
+## ✿ Quick start
 
 <table>
 <tr>
@@ -259,17 +110,15 @@ Then create a project and follow the sidebar.
 </table>
 
 > [!TIP]
-> The first launch takes a while: it creates the environment, downloads PyTorch for your GPU and builds the UI. Then <http://127.0.0.1:8765> opens by itself.
-
-### How a LoRA gets made
+> The first launch takes a while: it creates the environment, picks PyTorch for your driver (cu118–cu130) and builds the UI. Then <http://127.0.0.1:8765> opens by itself.
 
 ```mermaid
 flowchart LR
-    A[📥 Dataset] --> B[1 · Curation]
-    B --> C[2 · Preprocess]
-    C --> D[3 · Tags]
-    D --> E[4 · Reg set]
-    E --> F[5 · Train]
+    A[📥 Dataset] --> B[Curation]
+    B --> C[Preprocess]
+    C --> D[Tags]
+    D --> E[Reg set]
+    E --> F[Train]
     F --> G[📈 Queue / Monitor]
     G --> H[🎨 Generate / Soup]
     style C stroke-dasharray: 4 3
@@ -277,25 +126,6 @@ flowchart LR
 ```
 
 <sub>Dashed steps are optional.</sub>
-
-<details>
-<summary><b>Step by step</b></summary>
-
-<br>
-
-| Step | What you do |
-|---|---|
-| **Projects → New project** | The first version is created automatically |
-| **Dataset** | Upload images or a zip with captions, or scrape Booru |
-| **Curation** | Move what you want into train, group it into concepts, set aside a validation set |
-| **Preprocess** | Remove duplicates, upscale small images, crop — or skip |
-| **Tags** | Clean up captions with bulk operations |
-| **Reg set** | Generate one with the base model, collect one from Booru — or skip |
-| **Train** | Pick a preset, adjust parameters, enter the trigger word for DOP, press **Start training** |
-| **Queue / Monitor** | Watch loss, samples and logs; pause and resume |
-| **Generate** | Test epochs with single renders or an XY matrix, blend the best into a soup |
-
-</details>
 
 <details>
 <summary><b>Commands and flags</b></summary>
@@ -308,7 +138,7 @@ python -m studio test         # pytest + vitest
 
 studio.bat --torch=cu128      # force a specific PyTorch build
 studio.bat --reinstall        # recreate venv (studio_data is kept)
-LemongrassisLora.exe --check   # diagnostics: Python, venv, GPU, cache paths
+LemongrassisLora.exe --check  # diagnostics: Python, venv, GPU, cache paths
 
 python tools/download_models.py                  # every model from HuggingFace
 python tools/download_models.py --modelscope     # via ModelScope
@@ -319,75 +149,141 @@ python tools/download_models.py --endpoint URL   # via your own mirror
 
 <br>
 
-## Requirements
+## ✿ Features
+
+### 🗂 Dataset
+- **Import** images and zip archives by drag & drop or from disk, scrape Danbooru / Gelbooru.
+- **Curation**: a two-pane "dataset → train" view, `N_name` concept folders with repeats, a validation set.
+- **Preprocess** *(optional)*: duplicate review, ESRGAN upscaling, aspect-ratio cropping, inpainting — every action can be undone.
+- **Tag editor**: bulk add / remove / replace, dedupe, tag distribution, autocomplete, restore points.
+- **Reg set**: generated by the base model or pulled from Booru by the train set's tag distribution.
+- **Edit LoRA**: before → after image pairs for instruction-style edit adapters.
+
+### 🎛 Training
+- **Projects and versions**: one dataset, many versions, each with its own config, reg set and outputs.
+- **Presets** both ways: save a version as a preset or pull a preset into a version.
+- **An honest estimate**: steps, time measured from your own runs and a VRAM check before Start.
+- **GPU queue**: pause with progress saved, resume, schedule, auto-restart after a crash.
+- **Monitor**: loss and LR curves, samples every N steps, logs, zip export of outputs.
+
+<details>
+<summary><b>🧪 Algorithms</b></summary>
+
+<br>
+
+| | |
+|---|---|
+| **Adapters** | LoRA, LoKr, LoHa, DoRA, rs-LoRA, OrthoLoRA, T-LoRA, Riemann LoRA; per-layer ranks |
+| **Optimizers** | AdamW / AdamW8bit, Lion, CAME, Automagic, Prodigy (+ ScheduleFree), Simplified AdEMAMix, Muon, SOAP (+ SF), SinkGD — [how to choose](docs/user-guide/optimizers.md) |
+| **LR schedules** | cosine family, polynomial, REX, ReREX, Licatron |
+| **Timesteps** | logit-normal, uniform, mode, mixed, InfoNoise, Style-Friendly SNR, dual peak, Krea 2 shift, MOSS (truncated) logit-normal, low-noise quota |
+| **Per image** | caption variations for cached text, per-image loss watch and learning rate, adaptive LR |
+| **Against overfitting** | EMA of adapter weights, DOP, tone anchor — [EMA and DOP](docs/ema-and-dop.md) |
+| **Memory** | block swap, fp8 / ConvRot INT8, latent and text caches, NaViT packing — [details](docs/navit-packing.md) |
+| **Attention** | xformers / flash-attn / PyTorch SDPA |
+
+</details>
+
+### 🎨 Generation
+- Single images and XY matrices from a persistent daemon, several LoRAs with their own weights.
+- **Checkpoint soup**: average epochs or runs into one file and test it right away.
+
+### 🍋 A card inside every LoRA
+Each saved `.safetensors` carries a short summary in its metadata, readable in ComfyUI, SwarmUI, Forge and on Civitai:
+
+```
+✿ ─── 𝓛𝓮𝓶𝓸𝓷𝓰𝓻𝓪𝓼𝓼𝓲𝓼𝓛𝓸𝓻𝓪 ─── ✿
+
+  ✿ project · my_style_v3
+  ✿ base model · MOSS Image Base
+  ✿ network · lokr · factor 4
+  ✿ rank / alpha · 32 / 32
+  ✿ batch size · 4
+  ✿ timesteps · moss_truncated_logit_normal
+```
+
+<details>
+<summary><b>📱 Remote access from your phone</b></summary>
+
+<br>
+
+**Settings → Remote access**
+
+| Provider | Address | What you need |
+|---|---|---|
+| **Tailscale Funnel** | permanent `https://<computer>.<tailnet>.ts.net` | Tailscale on this computer, sign in once |
+| **ngrok** | permanent, on the free static domain | authtoken and domain from the ngrok dashboard |
+| **Cloudflare** | new on every start | nothing |
+
+Nothing is opened on your router. The link carries an access key, and the studio does not answer without it. **New access key** revokes every old one.
+
+</details>
+
+<details>
+<summary><b>📸 A quick tour</b></summary>
+
+<br>
 
 <table>
 <tr>
 <td width="50%" valign="top">
-
-#### 🖥 Hardware
-
-| | Minimum | Recommended |
-|---|---|---|
-| **GPU** | NVIDIA 6 GB | NVIDIA 16 GB+ |
-| **RAM** | 16 GB | 32 GB |
-| **Disk** | SSD, ~20 GB | SSD with headroom |
-
-<sub>6 GB works for Anima with block swap. Block swap pins up to 3.6 GB of RAM for Anima and ~11 GB for Krea 2 fp8.</sub>
-
+<img src="docs/images/overview-en.png" alt="Project overview" width="100%"><br>
+<b>Overview</b> · pipeline of the active version, tasks and versions.
 </td>
 <td width="50%" valign="top">
-
-#### 🧠 Models
-
-| Model | Base | Text encoder |
-|---|---|---|
-| [**Anima**](https://huggingface.co/circlestone-labs/Anima) | Cosmos-Predict2 DiT, 2B | Qwen3-0.6B |
-| **Krea 2** | single-stream MMDiT, fp8 base supported | Qwen3-VL-4B |
-
-<sub>Both train LoRA, LoKr and LoHa; outputs load into ComfyUI as they are.</sub>
-
+<img src="docs/images/dataset-en.png" alt="Dataset" width="100%"><br>
+<b>Dataset</b> · drag & drop or Booru scrape.
+</td>
+</tr>
+<tr>
+<td valign="top">
+<img src="docs/images/curate-en.png" alt="Curation" width="100%"><br>
+<b>Curation</b> · concept folders with repeats, validation set.
+</td>
+<td valign="top">
+<img src="docs/images/train-en.png" alt="Train" width="100%"><br>
+<b>Train</b> · hover tips, step budget, live preview.
+</td>
+</tr>
+<tr>
+<td valign="top">
+<img src="docs/images/task-en.png" alt="Task" width="100%"><br>
+<b>Task</b> · loss and LR curves, samples, logs.
+</td>
+<td valign="top">
+<img src="docs/images/queue-en.png" alt="Queue" width="100%"><br>
+<b>Queue</b> · one GPU slot, timeline, pause and resume.
 </td>
 </tr>
 </table>
+
+<sub>Screenshots use demo data.</sub>
+
+</details>
+
+<br>
+
+## ✿ Requirements
+
+| | Minimum | Recommended |
+|---|---|---|
+| **GPU** | NVIDIA 6 GB (Anima) / 12 GB (Krea 2, MOSS) | NVIDIA 16 GB+ |
+| **RAM** | 16 GB | 32 GB+ |
+| **Disk** | SSD, ~20 GB | SSD with headroom for models |
 
 > [!WARNING]
 > AMD GPUs and Apple Silicon are not supported.
 
 <br>
 
-## Documentation
+## ✿ Documentation
 
-<table>
-<tr>
-<td width="50%" valign="top">
-
-**📘 [User guide](docs/user-guide/)**<br>
-Captions and tags, regularization, optimizers, training parameters, custom models.
-
-</td>
-<td width="50%" valign="top">
-
-**🧪 Algorithms**<br>
-[EMA and DOP](docs/ema-and-dop.md) · [Style-Friendly SNR](docs/style-friendly-snr.md) · [NaViT packing](docs/navit-packing.md)
-
-</td>
-</tr>
-<tr>
-<td valign="top">
-
-**🏗 Architecture**<br>
-[How the studio is built](docs/architecture/) · [Decision records](docs/adr/) · [Backend and frontend](studio/README.md) · [Training core and plugins](runtime/training/README.md)
-
-</td>
-<td valign="top">
-
-**🤝 Project**<br>
-[Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
-
-</td>
-</tr>
-</table>
+| | |
+|---|---|
+| 📘 **User guide** | [Captions](docs/user-guide/caption-format.md) · [Tagging](docs/user-guide/tagging-guide.md) · [Regularization](docs/user-guide/regularization.md) · [Optimizers](docs/user-guide/optimizers.md) · [Training tips](docs/user-guide/training-tips.md) · [Custom models](docs/user-guide/custom-models.md) · [MOSS Image](docs/user-guide/moss-image.md) |
+| 🧪 **Algorithms** | [EMA and DOP](docs/ema-and-dop.md) · [Style-Friendly SNR](docs/style-friendly-snr.md) · [NaViT packing](docs/navit-packing.md) |
+| 🏗 **Architecture** | [How the studio is built](docs/architecture/) · [Decision records](docs/adr/) · [Backend and frontend](studio/README.md) · [Training core and plugins](runtime/training/README.md) |
+| 🤝 **Project** | [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) |
 
 <details>
 <summary><b>Repository layout</b></summary>
@@ -409,29 +305,30 @@ LemongrassisLora/
 
 <br>
 
-## Acknowledgements
+## ✿ Origin and credits
+
+> [!NOTE]
+> LemongrassisLora started as a fork of [WalkingMeatAxolotl/AnimaLoraStudio](https://github.com/WalkingMeatAxolotl/AnimaLoraStudio). The training core follows upstream **v0.20.2** with later fixes backported; the interface, explanations, remote access, Krea 2 / MOSS support and most of the training toolbox were reworked or added here.
 
 | Part | Source |
 |---|---|
 | **Original project** | [WalkingMeatAxolotl/AnimaLoraStudio](https://github.com/WalkingMeatAxolotl/AnimaLoraStudio) |
 | **Training scripts** | [Moeblack/AnimaLoraToolkit](https://github.com/Moeblack/AnimaLoraToolkit) |
-| **Model and VAE** | [circlestone-labs/Anima](https://huggingface.co/circlestone-labs/Anima) |
+| **Models** | [circlestone-labs/Anima](https://huggingface.co/circlestone-labs/Anima) · Krea 2 · [OpenMOSS MOSS Image](https://huggingface.co/OpenMOSS-Team/MOSS-Image-Base) |
 | **Adapters** | [LyCORIS](https://github.com/KohakuBlueleaf/LyCORIS) |
 | **Everything else** | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) |
 
-## License
+## ✿ License
 
 Code: **GPL-3.0** ([LICENSE](LICENSE)). Some third-party components (NVIDIA Cosmos, Wan2.1) are **Apache-2.0** ([LICENSE-APACHE](LICENSE-APACHE)).
 
 > [!IMPORTANT]
-> Model weights (Anima, Qwen, VAE) have their own licenses, including non-commercial restrictions. Check the model cards before using a trained LoRA commercially.
+> Model weights (Anima, Krea 2, MOSS, Qwen, VAEs) have their own licenses, some of them non-commercial. Check the model cards before using a trained LoRA commercially.
 
 <br>
 
 <div align="center">
 
-**LemongrassisLora** · made for people who train LoRAs, not for people who read training scripts
-
-<sub>Screenshots use demo data.</sub>
+✿ **LemongrassisLora** · made for people who train LoRAs, not for people who read training scripts ✿
 
 </div>
