@@ -28,8 +28,10 @@ class BaselineTimestepSampler:
         style_snr_mean: float = -6.0,
         style_snr_sigma: float = 2.0,
         dual_peak_config: DualPeakConfig | None = None,
+        logit_std: float = 1.0,
     ):
         self.mode = mode
+        self.logit_std = logit_std
         self.shift = shift
         self.mix_low_prob = mix_low_prob
         self.timestep_schedule_shift = timestep_schedule_shift
@@ -51,6 +53,7 @@ class BaselineTimestepSampler:
             style_snr_mean=self.style_snr_mean,
             style_snr_sigma=self.style_snr_sigma,
             dual_peak_config=self.dual_peak_config,
+            logit_std=self.logit_std,
         )
 
     def record(self, t: torch.Tensor, raw_mse: torch.Tensor) -> None:
@@ -93,6 +96,7 @@ def build(args, total_steps) -> BaselineTimestepSampler:
         style_snr_mean=_float_or(getattr(args, "style_snr_mean", None), -6.0),
         style_snr_sigma=_float_or(getattr(args, "style_snr_sigma", None), 2.0),
         dual_peak_config=config_from_args(args),
+        logit_std=_float_or(getattr(args, "timestep_logit_std", None), 1.0),
     )
 
 

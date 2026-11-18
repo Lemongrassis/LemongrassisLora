@@ -27,6 +27,7 @@ def sample_t(
     style_snr_mean: float = -6.0,
     style_snr_sigma: float = 2.0,
     dual_peak_config: DualPeakConfig | None = None,
+    logit_std: float = 1.0,
 ) -> torch.Tensor:
     """Sample the Flow Matching timestep t in (0, 1).
 
@@ -74,11 +75,13 @@ def sample_t(
         # Recursively call the base mode to sample the biased end (don't
         # pass mix_low_prob again, to avoid a loop; don't apply the schedule
         # shift internally here either, leave it to be applied once at the end)
-        t_biased = sample_t(bs, device, mode=biased_mode, shift=shift, mix_low_prob=0.0, timestep_schedule_shift=1.0)
+        t_biased = sample_t(bs, device, mode=biased_mode, shift=shift, mix_low_prob=0.0, timestep_schedule_shift=1.0,
+                            logit_std=logit_std)
         t = torch.where(use_biased, t_biased, t_uniform)
         return _apply_timestep_schedule_shift(t, timestep_schedule_shift)
 
-    u = torch.sigmoid(torch.randn(bs, device=device))
+    # logit_std = sd-scripts' sigmoid_scale: t = sigmoid(logit_std * N(0, 1)); 1.0 = standard logit-normal
+    u = torch.sigmoid(torch.randn(bs, device=device) * float(logit_std))
 
     if mode == "logit_normal_low":
         s = max(float(shift), 1e-4)

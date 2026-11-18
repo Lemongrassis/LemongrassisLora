@@ -11,9 +11,6 @@ from pathlib import Path
 from typing import Any
 
 APP_NAME = "LemongrassisLora"
-# bold_cursive Unicode letters, made with the cute-text skill's fontify.py
-_TITLE = "𝓛𝓮𝓶𝓸𝓷𝓰𝓻𝓪𝓼𝓼𝓲𝓼𝓛𝓸𝓻𝓪"
-_MARK = "✿"
 
 
 def _fmt_num(value: Any) -> str:
@@ -89,13 +86,9 @@ def build_card(args: Any, injector: Any, family_id: str, model: Any = None) -> d
         ("batch size", batch),
         ("timesteps", timesteps),
     ]
-    card = "\n".join([
-        f"{_MARK} ─── {_TITLE} ─── {_MARK}",
-        "",
-        *(f"  {_MARK} {key} · {value}" for key, value in rows),
-        "",
-        f"        ─── {_MARK} ───",
-    ])
+    # One plain line: metadata viewers show raw strings, so newlines turn into "\n"
+    # and styled Unicode letters into boxes.
+    card = f"{APP_NAME} | " + " | ".join(f"{key}: {value}" for key, value in rows)
     return {
         "lemongrassis.card": card,
         "lemongrassis.trainer": APP_NAME,

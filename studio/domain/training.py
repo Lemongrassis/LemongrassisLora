@@ -1218,6 +1218,15 @@ class TrainingConfig(BaseModel):
             advanced=True,
         ),
     )
+    timestep_logit_std: float = Field(
+        1.0, ge=0.1, le=5.0,
+        description="Width of the logit-normal: t = sigmoid(std * N(0,1)). 1.0 = standard; higher spreads samples toward both ends. Same as sd-scripts sigmoid_scale",
+        json_schema_extra=_meta(
+            "timestep_sampling",
+            show_when="timestep_sampling==logit_normal||timestep_sampling==logit_normal_low||timestep_sampling==mode||timestep_sampling==mixed_uniform_low||timestep_sampling==mixed_uniform_logit",
+            advanced=True,
+        ),
+    )
     timestep_mix_low_prob: float = Field(
         0.0, ge=0.0, le=1.0,
         description="Fraction of samples routed to the biased end under mixed_* modes: 0 = fully uniform; typical range 0.15-0.30",

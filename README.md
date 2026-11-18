@@ -192,14 +192,7 @@ python tools/download_models.py --endpoint URL   # via your own mirror
 Each saved `.safetensors` carries a short summary in its metadata, readable in ComfyUI, SwarmUI, Forge and on Civitai:
 
 ```
-✿ ─── 𝓛𝓮𝓶𝓸𝓷𝓰𝓻𝓪𝓼𝓼𝓲𝓼𝓛𝓸𝓻𝓪 ─── ✿
-
-  ✿ project · my_style_v3
-  ✿ base model · MOSS Image Base
-  ✿ network · lokr · factor 4
-  ✿ rank / alpha · 32 / 32
-  ✿ batch size · 4
-  ✿ timesteps · moss_truncated_logit_normal
+LemongrassisLora | project: my_style_v3 | base model: MOSS Image Base | network: lokr · factor 4 | rank / alpha: 32 / 32 | batch size: 4 | timesteps: moss_truncated_logit_normal
 ```
 
 <details>

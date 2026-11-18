@@ -708,6 +708,7 @@
       "pyramid_noise_discount": "Per-level decay coefficient (0.1-0.9). Key knob for low-frequency strength: this implementation normalizes overall noise std to 1, so discount sets the low-frequency share. 0.1-0.4 leaves noise close to standard Gaussian after normalization (equivalent to off); 0.5-0.7 significantly alters low-frequency structure",
       "timestep_sampling": "Sampling distribution. dual_peak has two configurable peaks and a broad style background; style_friendly emphasizes a high-noise window; logit_normal is the Anima default; uniform covers all t equally. dual_peak ignores timestep_shift, but schedule and resolution shifts still move the curve.",
       "timestep_shift": "Internal distribution shift for logit-normal / mode: >1 biases the high-noise end (coarse structure), <1 biases the low-noise end (details)",
+      "timestep_logit_std": "Width of the logit-normal: t = sigmoid(std × N(0,1)). 1.0 = standard; higher spreads samples toward both ends. Same as sd-scripts sigmoid_scale",
       "timestep_mix_low_prob": "Ratio of samples sent to the biased end in mixed_* modes: 0 = all uniform; typical 0.15-0.30",
       "infonoise_enabled": "[InfoNoise] Enable adaptive timestep sampling: dynamically adjusts the t distribution during training based on information content, focusing on more useful training intervals",
       "infonoise_K": "[InfoNoise] Number of log-σ bins (16-256): larger = finer resolution but sparser samples per bin",
