@@ -86,9 +86,12 @@ def build_card(args: Any, injector: Any, family_id: str, model: Any = None) -> d
         ("batch size", batch),
         ("timesteps", timesteps),
     ]
-    # One plain line: metadata viewers show raw strings, so newlines turn into "\n"
-    # and styled Unicode letters into boxes.
-    card = f"{APP_NAME} | " + " | ".join(f"{key}: {value}" for key, value in rows)
+    # Plain letters only: styled Unicode (math script) letters show as boxes in many fonts.
+    width = max(len(key) for key, _ in rows)
+    card = "\n".join([
+        f"✿ ── {APP_NAME} ── ✿",
+        *(f"{key.ljust(width)} : {value}" for key, value in rows),
+    ])
     return {
         "lemongrassis.card": card,
         "lemongrassis.trainer": APP_NAME,
