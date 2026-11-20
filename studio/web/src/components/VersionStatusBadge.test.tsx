@@ -53,14 +53,14 @@ describe('VersionStatusBadge', () => {
       <VersionStatusBadge status="preparing" phase="editing" />
     )
     expect(container.querySelector('.badge')?.textContent).toBe(
-      `${i18n.t('versionStatus.preparing')} · ${i18n.t('versionPhase.editing')}`
+      `${i18n.t('versionStatus.preparing')}, ${i18n.t('versionPhase.editing')}`
     )
   })
 
   it('shows suffix for optional phases too (PR #265 review)', () => {
     const cases = [
-      ['preprocessing', 'Preparing · Preprocess'],
-      ['regularizing', 'Preparing · Regularization'],
+      ['preprocessing', 'Preparing, Preprocess'],
+      ['regularizing', 'Preparing, Regularization'],
     ] as const
     for (const [phase, text] of cases) {
       const { container } = render(

@@ -108,6 +108,13 @@ describe('Sidebar (PP0)', () => {
     // Settings is no longer a route link, just a button that opens the right-hand drawer; no href
     expect(screen.getByRole('button', { name: /Settings/ })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /Settings/ })).toBeNull()
+    const support = screen.getByRole('link', { name: /Ko-fi/ })
+    expect(screen.getByRole('button', { name: /Settings/ }).nextElementSibling).toContainElement(support)
+    const github = screen.getByRole('link', { name: 'GitHub' })
+    expect(support.nextElementSibling).toBe(github)
+    expect(github).toHaveAttribute('href', 'https://github.com/Lemongrassis/LemongrassisLora')
+    expect(support).toHaveAttribute('href', 'https://ko-fi.com/lemongrassis')
+    expect(support).toHaveAttribute('target', '_blank')
   })
 
   it('marks the active route', () => {

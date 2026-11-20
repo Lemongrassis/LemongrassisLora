@@ -390,7 +390,7 @@ describe('GeneratePage end-to-end smoke', () => {
     const initialAxisInput = await screen.findByDisplayValue(/20, 25, 30/)
     expect(initialAxisInput).toBeInTheDocument()
 
-    const thumb = await screen.findByTitle(/xy plot 1 ·/)
+    const thumb = await screen.findByTitle(/^xy plot 1\b/)
     await user.click(thumb)
 
     await waitFor(() => {
@@ -478,7 +478,7 @@ describe('GeneratePage end-to-end smoke', () => {
     setup()
     await waitForInitialLorasLoad()
 
-    const thumb = await screen.findByTitle(/xy plot 1 ·/)
+    const thumb = await screen.findByTitle(/^xy plot 1\b/)
     await user.click(thumb)
     await waitFor(() => expect(screen.getByText('xy plot 1')).toBeInTheDocument())
 

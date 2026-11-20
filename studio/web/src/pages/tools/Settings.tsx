@@ -64,6 +64,8 @@ const TRAINING_SECTIONS: { id: string; labelKey: string }[] = [
   { id: 'flash-attn', labelKey: 'settings.flashAttn' },
   { id: 'xformers', labelKey: 'settings.xformers' },
   { id: 'models', labelKey: 'settings.trainingModels' },
+  { id: 'gelbooru', labelKey: 'settings.gelbooru' },
+  { id: 'danbooru', labelKey: 'settings.danbooru' },
 ]
 
 // Fallback preset: only acts as a placeholder when GET /api/secrets fails; the real
@@ -333,7 +335,7 @@ export default function SettingsPage() {
     try {
       const next = await api.updateSecrets(patch)
       setServer(next)
-      setDraft(next)
+      setDraft(withSecretsDefaults(next))
       // After the candidate model_ids change, the wd14 variants in the catalog need a refresh
       void reloadCatalog()
       toast(t('settings.saved'), 'success')
@@ -469,6 +471,35 @@ export default function SettingsPage() {
         catalogError={catalogError}
         t={t}
       />
+
+      {(['gelbooru', 'danbooru'] as const).map((service) => {
+        const name = t(`settings.${service}`)
+        const identity = t(service === 'gelbooru' ? 'settings.fieldUserId' : 'settings.fieldUsername')
+        return (
+          <SettingsSection key={service} id={service} title={name}>
+            <div className="ds-fgrid">
+              <SetCell label={identity}>
+                <input
+                  className={textInputClass}
+                  aria-label={`${name} — ${identity}`}
+                  value={service === 'gelbooru' ? draft.gelbooru.user_id : draft.danbooru.username}
+                  onChange={(e) => service === 'gelbooru'
+                    ? update(service, 'user_id', e.target.value)
+                    : update(service, 'username', e.target.value)}
+                />
+              </SetCell>
+              <SetCell label={t('settings.fieldApiKey')}>
+                <SensitiveInput
+                  label={`${name} — ${t('settings.fieldApiKey')}`}
+                  value={draft[service].api_key}
+                  serverValue={server?.[service].api_key ?? ''}
+                  onChange={(v) => update(service, 'api_key', v)}
+                />
+              </SetCell>
+            </div>
+          </SettingsSection>
+        )
+      })}
 
     </div>
       </div>
@@ -1011,24 +1042,10 @@ function SectionIndex({
   )
 }
 
-function SensitiveInput({ value, serverValue, onChange }: {
-  value: string; serverValue: string; onChange: (v: string) => void
+function SensitiveInput({ label, value, serverValue, onChange }: {
+  label?: string; value: string; serverValue: string; onChange: (v: string) => void
 }) {
   const { t } = useTranslation()
-  const [localValue, setLocalValue] = useState(value)
-
-  useEffect(() => {
-    setLocalValue(value)
-  }, [value])
-
-  const masked = localValue === MASK
-
-  const handleBlur = () => {
-    if (localValue !== value) {
-      onChange(localValue)
-    }
-  }
-
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.currentTarget.blur()
@@ -1038,10 +1055,10 @@ function SensitiveInput({ value, serverValue, onChange }: {
   return (
     <input
       type="password"
-      value={masked ? '' : localValue}
+      aria-label={label}
+      value={value === MASK ? '' : value}
       placeholder={serverValue === MASK ? t('settings.sensitiveSavedPlaceholder') : ''}
-      onChange={(e) => setLocalValue(e.target.value || MASK)}
-      onBlur={handleBlur}
+      onChange={(e) => onChange(e.target.value || serverValue)}
       onKeyDown={handleKeyDown}
       autoComplete="new-password"
       data-lpignore="true"
@@ -1072,24 +1089,17 @@ function HFEndpointSelect({ value, onChange }: {
 }) {
   const { t } = useTranslation()
   const isPreset = HF_ENDPOINT_PRESETS.some(p => p.value !== '__custom__' && p.value === value)
-  const [mode, setMode] = useState<'preset' | 'custom'>(isPreset ? 'preset' : 'custom')
-  const selectedPreset = isPreset
-    ? value
-    : (mode === 'custom' ? '__custom__' : '')
+  const [editingCustom, setEditingCustom] = useState(false)
+  const custom = editingCustom || !isPreset
 
   return (
     <div className="flex flex-col gap-1.5">
       <select
-        value={selectedPreset}
+        value={custom ? '__custom__' : value}
         onChange={(e) => {
           const v = e.target.value
-          if (v === '__custom__') {
-            setMode('custom')
-            // Don't clear the current value, let the user type below
-          } else {
-            setMode('preset')
-            onChange(v)
-          }
+          setEditingCustom(v === '__custom__')
+          if (v !== '__custom__') onChange(v)
         }}
         className={textInputClass}
       >
@@ -1099,7 +1109,7 @@ function HFEndpointSelect({ value, onChange }: {
           </option>
         ))}
       </select>
-      {mode === 'custom' && (
+      {custom && (
         <input
           type="text"
           value={value && !isPreset ? value : ''}

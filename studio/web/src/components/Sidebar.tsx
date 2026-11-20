@@ -59,6 +59,7 @@ const svg = (d: React.ReactNode, size = 15, w = 1.7) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={w} strokeLinecap="round" strokeLinejoin="round">{d}</svg>
 )
 const I = {
+  coffee:   svg(<><path d="M3 7h13v7a5 5 0 0 1-5 5H8a5 5 0 0 1-5-5zM16 8h2a3 3 0 0 1 0 6h-2" /><path d="M7 3v1m4-1v1" /></>),
   folder:   svg(<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />),
   folderSm: svg(<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />, 12, 2),
   folderTile: svg(<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />, 15, 1.9),
@@ -581,13 +582,13 @@ export default function Sidebar({
       )}
 
       <nav className={`ds-sidenav overflow-y-auto overflow-x-hidden ${collapsed ? '!px-2' : ''}`} style={{ scrollbarGutter: 'auto' }}>
-        <NavItem to="/" label={t('nav.projects')} icon={I.folder} active={!inProject && location.pathname === '/'} collapsed={collapsed} />
+        <NavItem to="/" label={t('nav.projects')} icon={I.folder} active={location.pathname === '/'} collapsed={collapsed} />
 
         {inProject && !inEditProject && pid && stepper}
 
         <NavItem to="/datasets" label={t('nav.datasets')} icon={I.datasets} active={isMain('/datasets')} collapsed={collapsed} />
 
-        <NavItem to="/edit" label={t('nav.editLora')} icon={I.edit} active={!inProject && isMain('/edit')} collapsed={collapsed} />
+        <NavItem to="/edit" label={t('nav.editLora')} icon={I.edit} active={isMain('/edit')} collapsed={collapsed} />
 
         {inEditProject && pid && stepper}
 
@@ -605,9 +606,28 @@ export default function Sidebar({
           onClick={() => settingsDrawer.isOpen ? void settingsDrawer.close() : settingsDrawer.open()}
           label={t('nav.settings')}
           icon={I.cog}
-          active={false}
+          active={settingsDrawer.isOpen}
           collapsed={collapsed}
         />
+        <div className={collapsed ? 'flex flex-col gap-0.5' : 'flex items-center gap-1'}>
+          <a
+            href="https://ko-fi.com/lemongrassis"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={navCls(false, collapsed)}
+            title={collapsed ? t('nav.supportKofi') : undefined}
+            aria-label={collapsed ? t('nav.supportKofi') : undefined}
+          >
+            {I.coffee}
+            {!collapsed && <span>{t('nav.supportKofi')}</span>}
+          </a>
+          <a href="https://github.com/Lemongrassis/LemongrassisLora" target="_blank" rel="noopener noreferrer"
+            className="ds-nav-item !w-auto justify-center" title="GitHub" aria-label="GitHub">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.65 7.65 0 0 1 8 3.86c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+            </svg>
+          </a>
+        </div>
       </div>
     </aside>
   )

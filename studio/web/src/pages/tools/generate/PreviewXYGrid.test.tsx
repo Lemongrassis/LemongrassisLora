@@ -126,13 +126,13 @@ describe('PreviewXYGrid', () => {
     )
 
     await user.dblClick(screen.getAllByRole('img')[0])
-    expect(screen.getByText(/Steps=20 .* CFG Scale=3/)).toBeInTheDocument()
+    expect(screen.getByText(/Steps=20, CFG Scale=3/)).toBeInTheDocument()
 
     await user.keyboard('{ArrowRight}')
-    expect(screen.getByText(/Steps=25 .* CFG Scale=3/)).toBeInTheDocument()
+    expect(screen.getByText(/Steps=25, CFG Scale=3/)).toBeInTheDocument()
 
     await user.keyboard('{ArrowDown}')
-    expect(screen.getByText(/Steps=25 .* CFG Scale=5/)).toBeInTheDocument()
+    expect(screen.getByText(/Steps=25, CFG Scale=5/)).toBeInTheDocument()
   })
 
   it('uses sample.imageUrl when provided (disk replay path)', () => {
