@@ -1,6 +1,12 @@
 import '@testing-library/jest-dom/vitest'
 import { vi } from 'vitest'
 
+// Use the simulated browser's storage even when Node exposes its own.
+declare const jsdom: { window: Window }
+for (const key of ['localStorage', 'sessionStorage'] as const) {
+  Object.defineProperty(globalThis, key, { configurable: true, value: jsdom.window[key] })
+}
+
 // Test environment default locale = en: tests assert English literals.
 // Explicitly force it after import (import gets hoisted, so pre-writing
 // localStorage wouldn't help) so the suite doesn't depend on init()'s default.

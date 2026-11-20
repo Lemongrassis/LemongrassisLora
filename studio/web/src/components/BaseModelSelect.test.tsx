@@ -48,7 +48,7 @@ describe('BaseModelSelect per family (multi-model P4-4)', () => {
     await screen.findByRole('option', { name: /raw/ })
     expect(optionValues()).toEqual(['raw', 'turbo'])
     // purpose badge (raw=training / turbo=inference) appears in the label
-    expect(screen.getByRole('option', { name: /turbo · inference/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /turbo, inference/ })).toBeInTheDocument()
     // defaultValue follows that family's selected
     expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('raw')
   })

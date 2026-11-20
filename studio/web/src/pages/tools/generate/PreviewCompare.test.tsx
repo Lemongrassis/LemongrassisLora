@@ -51,8 +51,8 @@ describe('PreviewCompare', () => {
 
   it('shows axis labels for both samples (2D)', () => {
     renderCompare()
-    expect(screen.getByText(/Steps=20 · CFG Scale=3/)).toBeInTheDocument()
-    expect(screen.getByText(/Steps=30 · CFG Scale=5/)).toBeInTheDocument()
+    expect(screen.getByText(/Steps=20, CFG Scale=3/)).toBeInTheDocument()
+    expect(screen.getByText(/Steps=30, CFG Scale=5/)).toBeInTheDocument()
   })
 
   it('shows only X label when yDraft is null (1D)', () => {

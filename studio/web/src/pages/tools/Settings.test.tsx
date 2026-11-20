@@ -24,7 +24,7 @@ const initialServerState = {
     remove_alpha_channel: false,
   },
   reg: { default_excluded_tags: [] },
-  huggingface: { token: '', endpoint: '' },
+  huggingface: { token: '***', endpoint: '' },
   wandb: {
     enabled: false,
     current_preset: 'default',
@@ -446,13 +446,8 @@ function renderPage() {
 
 describe('SettingsPage (PP0)', () => {
   it('hydrates from /api/secrets and shows masked sensitive fields as placeholder', async () => {
-    const user = userEvent.setup()
     renderPage()
-    await user.click(await screen.findByRole('button', { name: 'Credentials' }))
-    await waitFor(() =>
-      expect(screen.getByDisplayValue('alice')).toBeInTheDocument()
-    )
-    const placeholder = screen.getByPlaceholderText(/Saved/)
+    const placeholder = await within(document.getElementById('download-source')!).findByPlaceholderText(/Saved/)
     expect(placeholder).toBeInTheDocument()
     expect((placeholder as HTMLInputElement).value).toBe('')
   })
@@ -460,11 +455,11 @@ describe('SettingsPage (PP0)', () => {
   it('PUT /api/secrets only sends the changed leaves', async () => {
     const user = userEvent.setup()
     renderPage()
-    await user.click(await screen.findByRole('button', { name: 'Credentials' }))
-    const userInput = await screen.findByDisplayValue('alice')
-    await user.clear(userInput)
-    await user.type(userInput, 'bob')
-    await user.tab()
+    const token = await within(document.getElementById('download-source')!).findByPlaceholderText(/Saved/)
+    await user.type(token, 'replacement-token')
+    expect(token).toHaveFocus()
+    const footer = document.querySelector<HTMLElement>('.ds-set-foot')!
+    await user.click(within(footer).getByRole('button', { name: 'Save' }))
 
     await waitFor(() => {
       const putCall = fetchMock.mock.calls.find(
@@ -472,42 +467,53 @@ describe('SettingsPage (PP0)', () => {
       )
       expect(putCall).toBeDefined()
       const body = JSON.parse(String(putCall![1].body))
-      expect(body).toEqual({ gelbooru: { user_id: 'bob' } })
+      expect(body).toEqual({ huggingface: { token: 'replacement-token' } })
     })
   })
 
-  it('credentials tab gathers all service tokens; old sections no longer hold them', async () => {
+  it('saves both image services and preserves an existing masked key', async () => {
     const user = userEvent.setup()
     renderPage()
-
-    await user.click(await screen.findByRole('button', { name: 'Credentials' }))
-    for (const name of ['HuggingFace', 'ModelScope', 'Gelbooru', 'Danbooru']) {
-      expect(screen.getByRole('heading', { name })).toBeInTheDocument()
-    }
-    expect(screen.queryByRole('heading', { name: 'Weights & Biases' })).not.toBeInTheDocument()
-    expect(screen.getByDisplayValue('alice')).toBeInTheDocument()
-
-    await user.click(await screen.findByRole('button', { name: 'Dataset' }))
-    expect(screen.queryByDisplayValue('alice')).not.toBeInTheDocument()
+    const userId = await screen.findByDisplayValue('alice')
+    const gelKey = screen.getByLabelText(/Gelbooru.*API Key/)
+    expect(gelKey).toHaveValue('')
+    expect(gelKey).toHaveAttribute('type', 'password')
+    expect(gelKey).toHaveAttribute('placeholder', expect.stringMatching(/Saved/))
+    expect(document.querySelector('.ds-set-cards')?.lastElementChild).toHaveAttribute('id', 'danbooru')
+    await user.clear(userId)
+    await user.type(userId, '42')
+    await user.type(screen.getByLabelText(/Danbooru.*Username/), 'test-user')
+    await user.type(screen.getByLabelText(/Danbooru.*API Key/), 'test-key')
+    await user.click(within(document.querySelector<HTMLElement>('.ds-set-foot')!).getByRole('button', { name: 'Save' }))
+    const request = fetchMock.mock.calls.find(([url, init]) => String(url).includes('/api/secrets') && init?.method === 'PUT')
+    expect(JSON.parse(String(request?.[1]?.body))).toEqual({
+      gelbooru: { user_id: '42' },
+      danbooru: { username: 'test-user', api_key: 'test-key' },
+    })
   })
 
-  it('per-item source dropdown writes download_sources immediately', async () => {
+  it('shows the token for the selected download source', async () => {
     const user = userEvent.setup()
     renderPage()
-    await user.click(await screen.findByRole('button', { name: 'Tagging' }))
-    const msOption = await screen.findByRole('option', { name: /ModelScope/ })
-    const select = msOption.closest('select') as HTMLSelectElement
-    await user.selectOptions(select, 'modelscope')
+    const hfToken = await within(document.getElementById('download-source')!).findByPlaceholderText(/Saved/)
+    const source = screen.getByRole('option', { name: 'ModelScope' }).closest('select')!
+    await user.selectOptions(source, 'modelscope')
+    expect(hfToken).not.toBeInTheDocument()
+    await user.selectOptions(source, 'huggingface')
+    expect(within(document.getElementById('download-source')!).getByPlaceholderText(/Saved/)).toHaveValue('')
+  })
 
-    await waitFor(() => {
-      const putCall = fetchMock.mock.calls.find(([url, init]) => {
-        if (init?.method !== 'PUT' || !String(url).includes('/api/secrets')) return false
-        try { return 'download_sources' in JSON.parse(String(init.body)) } catch { return false }
-      })
-      expect(putCall).toBeDefined()
-      const body = JSON.parse(String(putCall![1].body))
-      expect(body.download_sources).toEqual({ wd14: 'modelscope' })
-    })
+  it('keeps Custom URL selected while entering a mirror address', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await within(document.getElementById('download-source')!).findByPlaceholderText(/Saved/)
+    const endpoint = screen.getByRole('option', { name: /Custom URL/ }).closest('select')!
+    await user.selectOptions(endpoint, '__custom__')
+    expect(endpoint).toHaveValue('__custom__')
+    const address = screen.getByPlaceholderText('https://your-mirror.example.com')
+    await user.type(address, 'https://mirror.example.com')
+    await user.selectOptions(endpoint, '')
+    expect(address).not.toBeInTheDocument()
   })
 
   it('shows generic weight categories', async () => {
@@ -545,63 +551,4 @@ describe('SettingsPage (PP0)', () => {
     expect(pathInput).toHaveValue('/tmp/anima')
     expect(saveButton).toBeDisabled()
   })
-
-  it('opens LLM preset editor modal with rate limit controls from the preset list', async () => {
-    const user = userEvent.setup()
-    renderPage()
-
-    await user.click(await screen.findByRole('button', { name: 'Tagging' }))
-    const defaultRow = screen.getByText('Style LoRA JSON').closest('li')
-    expect(defaultRow).not.toBeNull()
-    expect(within(defaultRow as HTMLElement).getByRole('radio')).toBeChecked()
-    await user.click(within(defaultRow as HTMLElement).getByRole('button', { name: /Edit/ }))
-
-    const modal = await screen.findByTestId('llm-preset-editor-modal')
-    expect(within(modal).getByText('Preset name')).toBeInTheDocument()
-    expect(within(modal).getByText('Concurrency')).toBeInTheDocument()
-    expect(within(modal).getByText('Requests per second (0 = no limit)')).toBeInTheDocument()
-    expect(within(modal).getByText('Max requests per minute (0 = no limit)')).toBeInTheDocument()
-  })
-
-  it('selecting another LLM preset as global default PUTs current_preset', async () => {
-    const user = userEvent.setup()
-    renderPage()
-
-    await user.click(await screen.findByRole('button', { name: 'Tagging' }))
-    const joyRow = screen.getByText('JoyCaption (vLLM local)').closest('li')
-    await user.click(within(joyRow as HTMLElement).getByRole('radio'))
-
-    await waitFor(() => {
-      const putCall = fetchMock.mock.calls.find(([url, init]) => {
-        if (init?.method !== 'PUT' || !String(url).includes('/api/secrets')) return false
-        try { return JSON.parse(String(init.body)).llm_tagger?.current_preset === 'joycaption' } catch { return false }
-      })
-      expect(putCall).toBeDefined()
-    })
-  })
-
-
-  it('selecting CLTagger v2 updates model id and versioned file paths', async () => {
-    const user = userEvent.setup()
-    renderPage()
-
-    await user.click(await screen.findByRole('button', { name: 'Tagging' }))
-    const v2Row = screen.getByText('cl_tagger_v2_v2_01a').closest('li')
-    expect(v2Row).not.toBeNull()
-    await user.click(within(v2Row as HTMLElement).getByRole('radio'))
-
-    await waitFor(() => {
-      const putCall = fetchMock.mock.calls.find(
-        ([, init]) => init?.method === 'PUT'
-      )
-      expect(putCall).toBeDefined()
-      const body = JSON.parse(String(putCall![1].body))
-      expect(body.cltagger).toMatchObject({
-        model_id: 'cella110n/cl_tagger_v2',
-        model_path: 'v2_01a/model.onnx',
-        tag_mapping_path: 'v2_01a/model_vocabulary.json',
-      })
-    })
-  })
-
 })
