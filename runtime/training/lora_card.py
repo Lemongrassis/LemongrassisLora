@@ -50,18 +50,18 @@ def base_model_name(family_id: str, transformer_path: str | None, model: Any = N
 
 def network_label(args: Any, injector: Any) -> str:
     if getattr(args, "use_riemannian", False):
-        label = "lora · riemannion"
+        label = "lora, riemannion"
     else:
         lora_type = str(getattr(args, "lora_type", "lora") or "lora")
-        label = {"ortho": "lora · ortho", "tlora": "t-lora"}.get(lora_type, lora_type)
+        label = {"ortho": "lora, ortho", "tlora": "t-lora"}.get(lora_type, lora_type)
         if lora_type == "lokr":
             factor = getattr(injector, "factor", None)
             if factor is None:
                 factor = getattr(args, "lokr_factor", None)
             if factor is not None:
-                label += f" · factor {_fmt_num(factor)}"
+                label += f", factor {_fmt_num(factor)}"
     if getattr(args, "lora_dora", False):
-        label += " · dora"
+        label += ", dora"
     return label
 
 
@@ -78,20 +78,11 @@ def build_card(args: Any, injector: Any, family_id: str, model: Any = None) -> d
     batch = _fmt_num(getattr(args, "batch_size", 1))
     timesteps = str(getattr(args, "timestep_sampling", "") or "default")
 
-    rows = [
-        ("project", project),
-        ("base model", base),
-        ("network", network),
-        ("rank / alpha", rank_dim.replace("/", " / ")),
-        ("batch size", batch),
-        ("timesteps", timesteps),
-    ]
-    # Plain letters only: styled Unicode (math script) letters show as boxes in many fonts.
-    width = max(len(key) for key, _ in rows)
-    card = "\n".join([
-        f"✿ ── {APP_NAME} ── ✿",
-        *(f"{key.ljust(width)} : {value}" for key, value in rows),
-    ])
+    # One plain ASCII line: info panels show "\n" literally and styled symbols as boxes.
+    card = (
+        f"{APP_NAME} | project: {project} | base: {base} | network: {network} | "
+        f"rank/alpha: {rank_dim} | batch: {batch} | timesteps: {timesteps}"
+    )
     return {
         "lemongrassis.card": card,
         "lemongrassis.trainer": APP_NAME,
